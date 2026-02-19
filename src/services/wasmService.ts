@@ -178,20 +178,27 @@ export class WasmService {
       const result = analyzeWorkspaceFn(JSON.stringify({ files: filesToAnalyze }));
       const elapsed = Date.now() - start;
       console.log('[WASMService] Workspace analysis took:', elapsed, 'ms');
+      console.log('[WASMService] Raw result:', result?.substring(0, 500));
       
       if (!result) {
+        console.log('[WASMService] No result from WASM');
         return cachedResults;
       }
       
       const parsed = JSON.parse(result);
-      if (!parsed || !parsed.results) {
-        return cachedResults;
-      }
-
-      for (const [filename, analysisResult] of Object.entries(parsed.results)) {
-        const res = analysisResult as AnalysisResult;
-        this.cache.set(filename, { hash: computeHash(files.find(f => f.filename === filename)?.content || ''), result: res });
-        cachedResults.set(filename, res);
+      const resultsKey = parsed.results ? 'results' : 'Results';
+      console.log('[WASMService] Parsed results count:', Object.keys(parsed[resultsKey] || {}).length);
+      
+      for (const [filename, analysisResult] of Object.entries(parsed[resultsKey])) {
+        const res = analysisResult as any;
+        console.log('[WASMService] File:', filename, '-> imports:', res.imports?.length || res.Imports?.length, 'variables:', res.variables?.length || res.Variables?.length, 'parameters:', res.parameters?.length || res.Parameters?.length);
+        const result: AnalysisResult = {
+          imports: res.imports || res.Imports || [],
+          variables: res.variables || res.Variables || [],
+          parameters: res.parameters || res.Parameters || []
+        };
+        this.cache.set(filename, { hash: computeHash(files.find(f => f.filename === filename)?.content || ''), result });
+        cachedResults.set(filename, result);
       }
       
       return cachedResults;
@@ -236,20 +243,22 @@ export class WasmService {
       const start = Date.now();
       const result = analyzeCodeFn(JSON.stringify(requestWithHash));
       const elapsed = Date.now() - start;
+      console.log('[WASMService] Single file analysis took:', elapsed, 'ms, result:', result?.substring(0, 200));
       
       if (!result) {
         return { imports: [], variables: [], parameters: [] };
       }
       
       const parsed = JSON.parse(result);
+      console.log('[WASMService] Parsed single result:', JSON.stringify(parsed).substring(0, 200));
       if (!parsed) {
         return { imports: [], variables: [], parameters: [] };
       }
 
       const analysisResult: AnalysisResult = {
-        imports: parsed.imports || [],
-        variables: parsed.variables || [],
-        parameters: parsed.parameters || []
+        imports: (parsed.imports || parsed.Imports || []),
+        variables: (parsed.variables || parsed.Variables || []),
+        parameters: (parsed.parameters || parsed.Parameters || [])
       };
 
       this.cache.set(request.filename, { hash: contentHash, result: analysisResult });
