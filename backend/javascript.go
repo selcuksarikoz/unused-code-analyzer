@@ -29,6 +29,8 @@ var (
 	reJSImportFrom       = regexp.MustCompile(`(?m)^\s*import\s+([^;\n]+?)\s+from\s+['"][^'"]+['"]`)
 	reJSImportRequire    = regexp.MustCompile(`(?m)^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(['"][^'"]+['"]\)`)
 	reJSImportReqDestr   = regexp.MustCompile(`(?m)^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*require\(['"][^'"]+['"]\)`)
+	reJSExportNamedFrom  = regexp.MustCompile(`(?m)^\s*export\s*\{([^}]+)\}\s*from\s*['"][^'"]+['"]`)
+	reJSExportNsFrom     = regexp.MustCompile(`(?m)^\s*export\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"][^'"]+['"]`)
 	reJSFunctionDecl     = regexp.MustCompile(`(?m)^\s*(export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)`)
 	reJSClassDecl        = regexp.MustCompile(`(?m)^\s*(export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)\b`)
 	reJSVarDeclLine      = regexp.MustCompile(`(?m)^\s*(export\s+)?(?:const|let|var)\s+([^;\n]+)`)
@@ -40,15 +42,15 @@ var (
 
 func analyzeJSTS(content, filename string) AnalysisResult {
 	imports := findJSTSImports(content)
-	vars := findJSTSDefinitions(content)
+	defs := findJSTSDefinitions(content)
 	params := findJSTSParameters(content)
 
 	var named []NamedItem
 	for _, imp := range imports {
 		named = append(named, NamedItem{Name: imp.name, Line: imp.line})
 	}
-	for _, v := range vars {
-		named = append(named, NamedItem{Name: v.name, Line: v.line})
+	for _, d := range defs {
+		named = append(named, NamedItem{Name: d.name, Line: d.line})
 	}
 	for _, p := range params {
 		named = append(named, NamedItem{Name: p.name, Line: p.line})
@@ -69,12 +71,15 @@ func analyzeJSTS(content, filename string) AnalysisResult {
 	}
 
 	var unusedVars []CodeIssue
-	for _, v := range vars {
-		if !used[v.name] {
+	for _, d := range defs {
+		if d.exported && isFrameworkSpecialExport(d.name, filename) {
+			continue
+		}
+		if !used[d.name] {
 			unusedVars = append(unusedVars, CodeIssue{
 				ID:   generateUUID(),
-				Line: v.line,
-				Text: v.kind + " " + v.name,
+				Line: d.line,
+				Text: d.kind + " " + d.name,
 				File: filename,
 			})
 		}
@@ -135,6 +140,9 @@ func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, 
 
 	var unusedVars []CodeIssue
 	for _, d := range defs {
+		if d.exported && isFrameworkSpecialExport(d.name, filename) {
+			continue
+		}
 		if !used[d.name] {
 			unusedVars = append(unusedVars, CodeIssue{
 				ID:   generateUUID(),
@@ -157,7 +165,7 @@ func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, 
 		}
 	}
 
-	return outDefs, outImports, unusedVars, unusedParams
+	return outDefs, outImports, []CodeIssue{}, unusedParams
 }
 
 func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
@@ -176,6 +184,9 @@ func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, used
 
 	var unusedVars []CodeIssue
 	for _, v := range defs {
+		if v.Exported && isFrameworkSpecialExport(v.Name, file.Filename) {
+			continue
+		}
 		key := v.Name + "@" + file.Filename
 		if !usedNames[key] {
 			unusedVars = append(unusedVars, CodeIssue{
@@ -231,21 +242,20 @@ func findJSTSImports(content string) []jsImportItem {
 	for _, m := range reJSImportReqDestr.FindAllStringSubmatchIndex(content, -1) {
 		clause := content[m[2]:m[3]]
 		line := lineFromPos(content, m[0])
-		for _, part := range strings.Split(clause, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			name := part
-			if strings.Contains(part, ":") {
-				t := strings.Split(part, ":")
-				name = strings.TrimSpace(t[len(t)-1])
-			} else if strings.Contains(part, " as ") {
-				t := strings.Split(part, " as ")
-				name = strings.TrimSpace(t[len(t)-1])
-			}
+		for _, name := range extractDestructuredNames(clause) {
 			addJSImport(name, line, seen, &imports)
 		}
+	}
+
+	// Re-exported symbols should count as usage of source file exports in workspace mode.
+	for _, m := range reJSExportNamedFrom.FindAllStringSubmatchIndex(content, -1) {
+		clause := content[m[2]:m[3]]
+		line := lineFromPos(content, m[0])
+		collectJSImportNames("{"+clause+"}", line, seen, &imports)
+	}
+	for _, m := range reJSExportNsFrom.FindAllStringSubmatchIndex(content, -1) {
+		name := content[m[2]:m[3]]
+		addJSImport(name, lineFromPos(content, m[0]), seen, &imports)
 	}
 
 	return imports
@@ -253,15 +263,19 @@ func findJSTSImports(content string) []jsImportItem {
 
 func collectJSImportNames(clause string, line int, seen map[string]bool, imports *[]jsImportItem) {
 	c := strings.TrimSpace(clause)
-	if c == "" || strings.HasPrefix(c, "{") == false && strings.Contains(c, "{") == false && strings.HasPrefix(c, "*") == false {
-		if m := reJSDefaultImportPre.FindStringSubmatch(c); len(m) > 1 {
-			addJSImport(strings.TrimSpace(m[1]), line, seen, imports)
-		}
+	if c == "" {
+		return
 	}
 
+	// default import
+	if m := reJSDefaultImportPre.FindStringSubmatch(c); len(m) > 1 && !strings.HasPrefix(c, "{") && !strings.HasPrefix(c, "*") {
+		addJSImport(strings.TrimSpace(m[1]), line, seen, imports)
+	}
+
+	// named imports
 	if strings.Contains(c, "{") && strings.Contains(c, "}") {
 		start := strings.Index(c, "{")
-		end := strings.Index(c, "}")
+		end := strings.LastIndex(c, "}")
 		if start >= 0 && end > start {
 			inner := c[start+1 : end]
 			for _, part := range strings.Split(inner, ",") {
@@ -273,12 +287,16 @@ func collectJSImportNames(clause string, line int, seen map[string]bool, imports
 				if strings.Contains(part, " as ") {
 					t := strings.Split(part, " as ")
 					name = strings.TrimSpace(t[len(t)-1])
+				} else if strings.Contains(part, ":") {
+					t := strings.Split(part, ":")
+					name = strings.TrimSpace(t[len(t)-1])
 				}
 				addJSImport(name, line, seen, imports)
 			}
 		}
 	}
 
+	// namespace import
 	if strings.Contains(c, "* as ") {
 		parts := strings.Split(c, "* as ")
 		if len(parts) > 1 {
@@ -333,15 +351,24 @@ func findJSTSDefinitions(content string) []jsVarItem {
 
 	for _, m := range reJSVarDeclLine.FindAllStringSubmatchIndex(content, -1) {
 		exported := m[2] != -1
-		clause := content[m[4]:m[5]]
+		clause := strings.TrimSpace(content[m[4]:m[5]])
 		line := lineFromPos(content, m[0])
+
+		// Destructuring declaration: const {a, b: c} = obj / const [a, b] = arr
+		if strings.HasPrefix(clause, "{") || strings.HasPrefix(clause, "[") {
+			left := clause
+			if strings.Contains(left, "=") {
+				left = strings.TrimSpace(strings.Split(left, "=")[0])
+			}
+			for _, name := range extractDestructuredNames(left) {
+				addJSDef(name, line, "var", exported, seen, &defs)
+			}
+			continue
+		}
 
 		for _, part := range strings.Split(clause, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
-				continue
-			}
-			if strings.HasPrefix(part, "{") || strings.HasPrefix(part, "[") {
 				continue
 			}
 			if strings.Contains(part, "=") {
@@ -353,6 +380,74 @@ func findJSTSDefinitions(content string) []jsVarItem {
 	}
 
 	return defs
+}
+
+func extractDestructuredNames(pattern string) []string {
+	var names []string
+	seen := make(map[string]bool)
+
+	p := strings.TrimSpace(pattern)
+	if strings.HasPrefix(p, "{") && strings.HasSuffix(p, "}") {
+		inner := strings.TrimSpace(p[1 : len(p)-1])
+		for _, part := range strings.Split(inner, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			part = strings.TrimPrefix(part, "...")
+			if strings.Contains(part, "=") {
+				part = strings.TrimSpace(strings.Split(part, "=")[0])
+			}
+			if strings.Contains(part, ":") {
+				part = strings.TrimSpace(strings.Split(part, ":")[1])
+			}
+			if strings.HasPrefix(part, "{") || strings.HasPrefix(part, "[") {
+				for _, nested := range extractDestructuredNames(part) {
+					if !seen[nested] {
+						seen[nested] = true
+						names = append(names, nested)
+					}
+				}
+				continue
+			}
+			id := reJSIdentifier.FindString(part)
+			if isValidJSIdent(id) && !seen[id] {
+				seen[id] = true
+				names = append(names, id)
+			}
+		}
+		return names
+	}
+
+	if strings.HasPrefix(p, "[") && strings.HasSuffix(p, "]") {
+		inner := strings.TrimSpace(p[1 : len(p)-1])
+		for _, part := range strings.Split(inner, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			part = strings.TrimPrefix(part, "...")
+			if strings.Contains(part, "=") {
+				part = strings.TrimSpace(strings.Split(part, "=")[0])
+			}
+			if strings.HasPrefix(part, "{") || strings.HasPrefix(part, "[") {
+				for _, nested := range extractDestructuredNames(part) {
+					if !seen[nested] {
+						seen[nested] = true
+						names = append(names, nested)
+					}
+				}
+				continue
+			}
+			id := reJSIdentifier.FindString(part)
+			if isValidJSIdent(id) && !seen[id] {
+				seen[id] = true
+				names = append(names, id)
+			}
+		}
+	}
+
+	return names
 }
 
 func addJSDef(name string, line int, kind string, exported bool, seen map[string]bool, defs *[]jsVarItem) {
@@ -416,16 +511,71 @@ func collectJSParams(list string, line int, seen map[string]bool, params *[]jsPa
 			p = strings.TrimSpace(strings.Split(p, ":")[0])
 		}
 		name := reJSIdentifier.FindString(p)
-		if !isValidJSIdent(name) || name == "_" || seen[name+"@"+intToStr(line)] {
+		key := name + "@" + intToStr(line)
+		if !isValidJSIdent(name) || name == "_" || seen[key] {
 			continue
 		}
-		seen[name+"@"+intToStr(line)] = true
+		seen[key] = true
 		*params = append(*params, jsParamItem{
 			name: name,
 			line: line,
 			text: "parameter " + name,
 		})
 	}
+}
+
+func isFrameworkSpecialExport(name, filename string) bool {
+	if name == "" {
+		return false
+	}
+
+	lowerName := strings.ToLower(name)
+	lowerFile := strings.ToLower(strings.ReplaceAll(filename, "\\", "/"))
+
+	if strings.Contains(lowerFile, "/route.") {
+		switch name {
+		case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+			return true
+		}
+	}
+
+	if strings.Contains(lowerFile, "middleware.") {
+		switch lowerName {
+		case "config", "matcher", "runtime", "preferredregion":
+			return true
+		}
+	}
+
+	frameworkNames := map[string]bool{
+		"generatestaticparams": true,
+		"generatemetadata":     true,
+		"metadata":             true,
+		"viewport":             true,
+		"revalidate":           true,
+		"dynamic":              true,
+		"fetchcache":           true,
+		"runtime":              true,
+		"preferredregion":      true,
+		"maxduration":          true,
+		"loader":               true,
+		"action":               true,
+		"meta":                 true,
+		"links":                true,
+		"headers":              true,
+		"handle":               true,
+		"load":                 true,
+		"actions":              true,
+		"prerender":            true,
+		"ssr":                  true,
+		"csr":                  true,
+		"trailingslash":        true,
+		"entries":              true,
+	}
+	if frameworkNames[lowerName] {
+		return true
+	}
+
+	return false
 }
 
 func isValidJSIdent(name string) bool {

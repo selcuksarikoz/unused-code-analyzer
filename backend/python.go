@@ -15,7 +15,7 @@ func analyzePython(content, filename string) AnalysisResult {
 	imports := findPythonImportsAST(tree)
 	variables := findPythonVariablesAST(tree)
 	parameters := findPythonParametersAST(tree)
-	used := findUsedNamesPython(content, imports, variables)
+	used := findUsedNamesPython(content, imports, variables, parameters)
 
 	var unusedImports, unusedVars, unusedParams []CodeIssue
 
@@ -68,7 +68,7 @@ func analyzePythonForWorkspace(content, filename string) ([]Definition, []Import
 	imports := findPythonImportsForWorkspace(tree, filename)
 	variables := findPythonDefinitionsForWorkspace(tree, filename)
 	parameters := findPythonParametersForWorkspace(tree, filename)
-	used := findUsedNamesPython(content, toPyItemSlice(imports), toPyItemSliceVars(variables))
+	used := findUsedNamesPython(content, toPyItemSlice(imports), toPyItemSliceVars(variables), toPyItemSliceVars(parameters))
 
 	var unusedVars, unusedParams []CodeIssue
 
@@ -275,8 +275,22 @@ func findPythonParametersForWorkspace(tree ast.Ast, filename string) []pyItem {
 }
 
 func findPythonParametersFromContent(content, filename string) []CodeIssue {
-	// Use AST-based analysis instead of regex
-	return []CodeIssue{}
+	tree, err := parser.ParseString(content, py.ExecMode)
+	if err != nil {
+		return []CodeIssue{}
+	}
+
+	params := findPythonParametersAST(tree)
+	issues := make([]CodeIssue, 0, len(params))
+	for _, p := range params {
+		issues = append(issues, CodeIssue{
+			ID:   generateUUID(),
+			Line: p.line,
+			Text: p.text,
+			File: filename,
+		})
+	}
+	return issues
 }
 
 type pyItem struct {
@@ -464,12 +478,15 @@ func isValidPyIdent(s string) bool {
 	return true
 }
 
-func findUsedNamesPython(content string, imports []pyItem, variables []pyItem) map[string]bool {
+func findUsedNamesPython(content string, imports []pyItem, variables []pyItem, parameters []pyItem) map[string]bool {
 	var items []NamedItem
 	for _, item := range imports {
 		items = append(items, NamedItem{Name: item.name, Line: item.line})
 	}
 	for _, item := range variables {
+		items = append(items, NamedItem{Name: item.name, Line: item.line})
+	}
+	for _, item := range parameters {
 		items = append(items, NamedItem{Name: item.name, Line: item.line})
 	}
 	return FindUsedNames(content, items)

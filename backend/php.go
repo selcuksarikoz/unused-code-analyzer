@@ -10,6 +10,7 @@ func analyzePHP(content, filename string) AnalysisResult {
 	variables := findPHPVariables(content)
 	parameters := findPHPParameters(content)
 	used := findUsedNamesPHP(content, imports, variables)
+	paramUsed := findUsedParameterNames(content, parameters)
 
 	var unusedImports, unusedVars, unusedParams []CodeIssue
 
@@ -36,7 +37,8 @@ func analyzePHP(content, filename string) AnalysisResult {
 	}
 
 	for _, p := range parameters {
-		if !used[p.Text] {
+		paramName := strings.TrimPrefix(p.Text, "parameter ")
+		if !paramUsed[paramName] {
 			unusedParams = append(unusedParams, CodeIssue{
 				ID:   generateUUID(),
 				Line: p.Line,
@@ -58,6 +60,7 @@ func analyzePHPForWorkspace(content, filename string) ([]Definition, []Import, [
 	variables := findPHPDefinitions(content, filename)
 	parameters := findPHPParametersForWorkspace(content, filename)
 	used := findUsedNamesPHP(content, imports, toPHPDefSlice(variables))
+	paramUsed := findUsedParameterNames(content, parameters)
 
 	var unusedVars, unusedParams []CodeIssue
 
@@ -73,7 +76,8 @@ func analyzePHPForWorkspace(content, filename string) ([]Definition, []Import, [
 	}
 
 	for _, p := range parameters {
-		if !used[p.Text] {
+		paramName := strings.TrimPrefix(p.Text, "parameter ")
+		if !paramUsed[paramName] {
 			unusedParams = append(unusedParams, CodeIssue{
 				ID:   generateUUID(),
 				Line: p.Line,
@@ -327,4 +331,53 @@ func toPHPDefSlice(vars []Definition) []Definition {
 
 func importsToPHPSlice(imports []Import, filename string) []Import {
 	return imports
+}
+
+func buildResultPHP(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
+	var unusedImports []CodeIssue
+	for _, imp := range imports {
+		key := imp.Name + "@" + file.Filename
+		if !usedNames[key] {
+			unusedImports = append(unusedImports, CodeIssue{
+				ID:   generateUUID(),
+				Line: imp.Line,
+				Text: "use " + imp.Source + ";",
+				File: file.Filename,
+			})
+		}
+	}
+
+	var unusedVars []CodeIssue
+	for _, v := range defs {
+		key := v.Name + "@" + file.Filename
+		if !usedNames[key] {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: v.Line,
+				Text: v.Type + " " + v.Name,
+				File: file.Filename,
+			})
+		}
+	}
+
+	parameters := findPHPParametersForWorkspace(file.Content, file.Filename)
+	paramUsed := findUsedParameterNames(file.Content, parameters)
+	var unusedParams []CodeIssue
+	for _, p := range parameters {
+		paramName := strings.TrimPrefix(p.Text, "parameter ")
+		if !paramUsed[paramName] {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: p.Text,
+				File: file.Filename,
+			})
+		}
+	}
+
+	return AnalysisResult{
+		Imports:    unusedImports,
+		Variables:  unusedVars,
+		Parameters: unusedParams,
+	}
 }

@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall/js"
@@ -18,10 +21,20 @@ type MultiLangAnalyzer struct {
 	cache          map[string]CacheEntry
 	allDefinitions map[string][]Definition
 	allImports     map[string][]Import
+	parsedFiles    map[string]ParsedWorkspaceEntry
+	workspaceSig   string
+	workspaceRes   map[string]AnalysisResult
 }
 
 type WorkspaceAnalysisResult struct {
 	Results map[string]AnalysisResult
+}
+
+type ParsedWorkspaceEntry struct {
+	Hash        string
+	Lang        Language
+	Definitions []Definition
+	Imports     []Import
 }
 
 func NewMultiLangAnalyzer() *MultiLangAnalyzer {
@@ -29,6 +42,8 @@ func NewMultiLangAnalyzer() *MultiLangAnalyzer {
 		cache:          make(map[string]CacheEntry),
 		allDefinitions: make(map[string][]Definition),
 		allImports:     make(map[string][]Import),
+		parsedFiles:    make(map[string]ParsedWorkspaceEntry),
+		workspaceRes:   make(map[string]AnalysisResult),
 	}
 }
 
@@ -76,6 +91,11 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	defer a.mu.Unlock()
 
 	fmt.Printf("[Analyzer] AnalyzeWorkspace called with %d files\n", len(req.Files))
+	sig := workspaceSignature(req.Files)
+	if sig == a.workspaceSig && len(a.workspaceRes) > 0 {
+		fmt.Printf("[Analyzer] Workspace cache hit for signature %s\n", sig)
+		return WorkspaceAnalysisResult{Results: cloneAnalysisResults(a.workspaceRes)}
+	}
 
 	a.allDefinitions = make(map[string][]Definition)
 	a.allImports = make(map[string][]Import)
@@ -84,28 +104,9 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		lang := DetectLanguage(file.Filename)
 		fmt.Printf("[Analyzer] Workspace file: %s, lang: %s\n", file.Filename, lang)
 
-		switch lang {
-		case LangJavaScript, LangTypeScript:
-			defs, imports, _, _ := analyzeJSTSForWorkspace(file.Content, file.Filename)
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
-		case LangPython:
-			defs, imports, _, _ := analyzePythonForWorkspace(file.Content, file.Filename)
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
-		case LangGo:
-			defs, imports, _, _ := analyzeGoForWorkspace(file.Content, file.Filename)
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
-		case LangRuby:
-			defs, imports, _, _ := analyzeRubyForWorkspace(file.Content, file.Filename)
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
-		case LangPHP:
-			defs, imports, _, _ := analyzePHPForWorkspace(file.Content, file.Filename)
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
-		}
+		defs, imports := a.getParsedWorkspaceData(file, lang)
+		a.allDefinitions[file.Filename] = defs
+		a.allImports[file.Filename] = imports
 	}
 
 	usedNames := make(map[string]bool)
@@ -162,17 +163,81 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 			results[file.Filename] = buildResultGo(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangRuby:
-			results[file.Filename] = analyzeRuby(file.Content, file.Filename)
+			results[file.Filename] = buildResultRuby(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPHP:
-			results[file.Filename] = analyzePHP(file.Content, file.Filename)
+			results[file.Filename] = buildResultPHP(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		default:
 			results[file.Filename] = AnalysisResult{}
 		}
 	}
 
+	a.workspaceSig = sig
+	a.workspaceRes = cloneAnalysisResults(results)
 	return WorkspaceAnalysisResult{Results: results}
+}
+
+func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Language) ([]Definition, []Import) {
+	if cached, ok := a.parsedFiles[file.Filename]; ok {
+		if cached.Hash == file.Hash && cached.Lang == lang {
+			return cached.Definitions, cached.Imports
+		}
+	}
+
+	var defs []Definition
+	var imports []Import
+
+	switch lang {
+	case LangJavaScript, LangTypeScript:
+		defs, imports, _, _ = analyzeJSTSForWorkspace(file.Content, file.Filename)
+	case LangPython:
+		defs, imports, _, _ = analyzePythonForWorkspace(file.Content, file.Filename)
+	case LangGo:
+		defs, imports, _, _ = analyzeGoForWorkspace(file.Content, file.Filename)
+	case LangRuby:
+		defs, imports, _, _ = analyzeRubyForWorkspace(file.Content, file.Filename)
+	case LangPHP:
+		defs, imports, _, _ = analyzePHPForWorkspace(file.Content, file.Filename)
+	default:
+		defs = []Definition{}
+		imports = []Import{}
+	}
+
+	a.parsedFiles[file.Filename] = ParsedWorkspaceEntry{
+		Hash:        file.Hash,
+		Lang:        lang,
+		Definitions: defs,
+		Imports:     imports,
+	}
+	return defs, imports
+}
+
+func workspaceSignature(files []AnalyzeFile) string {
+	rows := make([]string, 0, len(files))
+	for _, f := range files {
+		rows = append(rows, f.Filename+"|"+f.Hash)
+	}
+	sort.Strings(rows)
+
+	h := fnv.New64a()
+	for _, r := range rows {
+		h.Write([]byte(r))
+		h.Write([]byte{'\n'})
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+func cloneAnalysisResults(in map[string]AnalysisResult) map[string]AnalysisResult {
+	out := make(map[string]AnalysisResult, len(in))
+	for k, v := range in {
+		out[k] = AnalysisResult{
+			Imports:    append([]CodeIssue(nil), v.Imports...),
+			Variables:  append([]CodeIssue(nil), v.Variables...),
+			Parameters: append([]CodeIssue(nil), v.Parameters...),
+		}
+	}
+	return out
 }
 
 func getFileContent(files []AnalyzeFile, filename string) string {

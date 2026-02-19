@@ -90,3 +90,15 @@ func containsWord(content, word string) bool {
 	}
 	return false
 }
+
+func findUsedParameterNames(content string, params []CodeIssue) map[string]bool {
+	var items []NamedItem
+	for _, p := range params {
+		name := strings.TrimSpace(strings.TrimPrefix(p.Text, "parameter "))
+		if name == "" {
+			continue
+		}
+		items = append(items, NamedItem{Name: name, Line: p.Line})
+	}
+	return FindUsedNames(content, items)
+}
