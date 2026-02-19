@@ -70,10 +70,6 @@
       {
         "command": "get-unused-imports.scanFolder",
         "title": "Get Unused: Scan Folder"
-      },
-      {
-        "command": "get-unused-imports.openWebview",
-        "title": "Get Unused: Analyzer"
       }
     ],
     "menus": {
@@ -123,12 +119,6 @@
           "when": "view == results",
           "title": "Scan Workspace",
           "icon": "$(refresh)"
-        },
-        {
-          "command": "get-unused-imports.openWebview",
-          "when": "view == results",
-          "title": "Analyzer",
-          "icon": "$(open-preview)"
         }
       ]
     },

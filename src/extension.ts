@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { AnalysisResult, CodeIssue } from './types';
 import { WasmService } from './services/wasmService';
-import { WebviewProvider } from './providers/webviewProvider';
 import { computeHash } from './utils/hash';
 import { isRelevantFile, detectLanguage } from './utils/fileUtils';
 import {
@@ -28,6 +27,10 @@ class ResultsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     setResults(results: FileIssue[]): void {
         this.results = results;
         this._onDidChangeTreeData.fire();
+    }
+
+    getResults(): FileIssue[] {
+        return this.results;
     }
 
     addResult(result: FileIssue): void {
@@ -138,16 +141,15 @@ class Extension implements vscode.Disposable {
     private wasmService: WasmService;
     private treeProvider: ResultsTreeProvider;
     private treeView: vscode.TreeView<vscode.TreeItem> | undefined;
-    private webviewProvider: WebviewProvider;
     private isScanning = false;
     private decorationCollection: vscode.TextEditorDecorationType[] = [];
     private autoAnalyzeTimeout: ReturnType<typeof setTimeout> | undefined;
     private fileHashes: Map<string, string> = new Map();
+    private fileIssues: FileIssue[] = [];
 
     constructor(private context: vscode.ExtensionContext) {
         this.wasmService = new WasmService();
         this.treeProvider = new ResultsTreeProvider();
-        this.webviewProvider = new WebviewProvider();
 
         this.registerCommands();
         this.registerTreeView();
@@ -242,10 +244,9 @@ class Extension implements vscode.Disposable {
             const totalIssues = result.imports.length + result.variables.length + result.parameters.length;
             
             const relativePath = vscode.workspace.asRelativePath(filePath);
-            const allIssues = [...result.imports, ...result.variables, ...result.parameters];
-
-            const existingResults = (this.treeProvider as any).results as FileIssue[] | undefined;
-            const existingIndex = existingResults?.findIndex(r => r.file === relativePath);
+            
+            const existingResults = this.treeProvider.getResults();
+            const existingIndex = existingResults.findIndex(r => r.file === relativePath);
 
             if (totalIssues > 0) {
                 const fileIssue: FileIssue = {
@@ -253,32 +254,24 @@ class Extension implements vscode.Disposable {
                     issues: result
                 };
 
-                if (existingIndex !== undefined && existingIndex >= 0) {
-                    existingResults![existingIndex] = fileIssue;
-                } else if (existingResults) {
+                if (existingIndex >= 0) {
+                    existingResults[existingIndex] = fileIssue;
+                } else {
                     existingResults.push(fileIssue);
                 }
-            } else if (existingIndex !== undefined && existingIndex >= 0) {
-                existingResults?.splice(existingIndex, 1);
+            } else if (existingIndex >= 0) {
+                existingResults.splice(existingIndex, 1);
             }
 
-            this.treeProvider.refresh();
+            this.treeProvider.setResults([...existingResults]);
             
-            const currentResults = this.treeProvider.getChildren() as vscode.TreeItem[];
             const allAnalysisResults: AnalysisResult = { imports: [], variables: [], parameters: [] };
             
-            for (const item of currentResults) {
-                if (item.contextValue === 'file') {
-                    const fileResult = existingResults?.find(r => vscode.workspace.asRelativePath(r.file) === (item as any).file);
-                    if (fileResult) {
-                        allAnalysisResults.imports.push(...fileResult.issues.imports);
-                        allAnalysisResults.variables.push(...fileResult.issues.variables);
-                        allAnalysisResults.parameters.push(...fileResult.issues.parameters);
-                    }
-                }
+            for (const fileResult of existingResults) {
+                allAnalysisResults.imports.push(...fileResult.issues.imports);
+                allAnalysisResults.variables.push(...fileResult.issues.variables);
+                allAnalysisResults.parameters.push(...fileResult.issues.parameters);
             }
-            
-            this.webviewProvider.updateContent(allAnalysisResults);
         } catch (error) {
             console.error('[Extension] Auto-analyze error:', error);
         }
@@ -293,7 +286,23 @@ class Extension implements vscode.Disposable {
     private getFileExtensions(): string {
         const config = vscode.workspace.getConfiguration('get-unused-imports');
         const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
-        return '**/*.{' + extensions.join(',') + '}';
+        return '**/*.' + extensions[0];
+    }
+
+    private async getAllFiles(): Promise<vscode.Uri[]> {
+        const config = vscode.workspace.getConfiguration('get-unused-imports');
+        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        const excludePattern = this.getExcludePattern();
+        
+        const allFiles: vscode.Uri[] = [];
+        
+        for (const ext of extensions) {
+            const pattern = `**/*.${ext}`;
+            const files = await vscode.workspace.findFiles(pattern, excludePattern);
+            allFiles.push(...files);
+        }
+        
+        return allFiles;
     }
 
     async init(): Promise<void> {
@@ -316,12 +325,6 @@ class Extension implements vscode.Disposable {
         this.context.subscriptions.push(
             vscode.commands.registerCommand('get-unused-imports.scanFolder', async (uri: vscode.Uri) => {
                 await this.scanFolder(uri);
-            })
-        );
-
-        this.context.subscriptions.push(
-            vscode.commands.registerCommand('get-unused-imports.openWebview', async () => {
-                this.webviewProvider.create(() => this.scanWorkspace());
             })
         );
 
@@ -392,9 +395,12 @@ class Extension implements vscode.Disposable {
         });
 
         this.treeView.onDidChangeVisibility(async (e) => {
+            console.log('[Extension] TreeView visibility changed:', e.visible);
             if (e.visible && this.isAutoAnalyzerEnabled()) {
-                const results = (this.treeProvider as any).results as FileIssue[] | undefined;
-                if (!results || results.length === 0) {
+                const results = this.treeProvider.getResults();
+                console.log('[Extension] Current results count:', results.length);
+                if (results.length === 0) {
+                    console.log('[Extension] No results, running initial scan...');
                     await this.scanWorkspace();
                 }
             }
@@ -415,9 +421,9 @@ class Extension implements vscode.Disposable {
         this.fileHashes.clear();
         vscode.window.showInformationMessage('Scanning workspace for unused code...');
 
-        const files = await vscode.workspace.findFiles(this.getFileExtensions(), this.getExcludePattern());
+        const files = await this.getAllFiles();
 
-        if (!files) {
+        if (!files || files.length === 0) {
             vscode.window.showInformationMessage('No files found to scan');
             this.isScanning = false;
             return;
@@ -461,10 +467,9 @@ class Extension implements vscode.Disposable {
         }
 
         this.treeProvider.addResults(fileResults);
-        this.webviewProvider.updateContent(allResults);
 
         this.isScanning = false;
-        const totalResults = (this.treeProvider as any).results?.length || 0;
+        const totalResults = this.treeProvider.getResults().length || 0;
         vscode.window.showInformationMessage(`Scan complete! Found ${totalResults} files with issues.`);
     }
 
@@ -516,11 +521,17 @@ class Extension implements vscode.Disposable {
         this.treeProvider.clear();
         vscode.window.showInformationMessage('Scanning folder...');
 
-        const ext = this.getFileExtensions().replace('**/*', '');
-        const pattern = new vscode.RelativePattern(uri.fsPath, '**/*' + ext);
-        const files = await vscode.workspace.findFiles(pattern, this.getExcludePattern());
+        const config = vscode.workspace.getConfiguration('get-unused-imports');
+        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        
+        const allFiles: vscode.Uri[] = [];
+        for (const ext of extensions) {
+            const pattern = new vscode.RelativePattern(uri.fsPath, `**/*.${ext}`);
+            const files = await vscode.workspace.findFiles(pattern, this.getExcludePattern());
+            allFiles.push(...files);
+        }
 
-        if (!files || files.length === 0) {
+        if (allFiles.length === 0) {
             vscode.window.showInformationMessage('No files found to scan');
             this.isScanning = false;
             return;
@@ -528,7 +539,7 @@ class Extension implements vscode.Disposable {
 
         const workspaceFiles: { content: string; filename: string }[] = [];
         
-        for (const file of files) {
+        for (const file of allFiles) {
             try {
                 const doc = await vscode.workspace.openTextDocument(file.fsPath);
                 const content = doc.getText();
@@ -561,7 +572,7 @@ class Extension implements vscode.Disposable {
         this.treeProvider.addResults(fileResults);
 
         this.isScanning = false;
-        const totalResults = (this.treeProvider as any).results?.length || 0;
+        const totalResults = this.treeProvider.getResults().length || 0;
         vscode.window.showInformationMessage(`Scan complete! Found ${totalResults} files with issues.`);
     }
 
