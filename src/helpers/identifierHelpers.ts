@@ -1,13 +1,4 @@
-export function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-export function isGlobalIdentifier(name: string): boolean {
-  const globals = new Set([
+const GLOBAL_IDENTIFIERS = new Set([
     'window', 'document', 'console', 'process', 'global', 'require',
     'module', 'exports', 'Buffer', 'setTimeout', 'setInterval',
     'clearTimeout', 'clearInterval', 'setImmediate', 'clearImmediate',
@@ -15,6 +6,16 @@ export function isGlobalIdentifier(name: string): boolean {
     'NaN', 'Infinity', 'eval', 'parseInt', 'parseFloat', 'isNaN', 'isFinite',
     'decodeURI', 'decodeURIComponent', 'encodeURI', 'encodeURIComponent',
     'escape', 'unescape',
-  ]);
-  return globals.has(name);
+]);
+
+export function isGlobalIdentifier(name: string): boolean {
+    return GLOBAL_IDENTIFIERS.has(name);
+}
+
+export function isPrivateIdentifier(name: string): boolean {
+    return name.startsWith('_');
+}
+
+export function shouldSkipIdentifier(name: string): boolean {
+    return isGlobalIdentifier(name) || isPrivateIdentifier(name);
 }

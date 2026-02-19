@@ -1,12 +1,17 @@
 import * as ts from 'typescript';
-import * as crypto from 'crypto';
-import type { AnalysisResult, CodeIssue } from '../types';
-import { generateUUID, isGlobalIdentifier } from './helpers';
-import { ImportInfo, VariableInfo, ParameterInfo, CacheEntry } from './types';
+import type { AnalysisResult, CodeIssue, ImportInfo, VariableInfo, ParameterInfo } from '../types';
+import { computeHash } from '../utils/hash';
+import { generateUUID } from '../helpers/uuidHelper';
+import { isGlobalIdentifier } from '../helpers/identifierHelpers';
+
+interface NativeCacheEntry {
+    hash: string;
+    result: AnalysisResult;
+}
 
 export class NativeJsAnalyzer {
   private compilerOptions: ts.CompilerOptions;
-  private cache: Map<string, CacheEntry> = new Map();
+  private cache: Map<string, NativeCacheEntry> = new Map();
 
   constructor() {
     this.compilerOptions = {
@@ -22,12 +27,8 @@ export class NativeJsAnalyzer {
     };
   }
 
-  private computeHash(content: string): string {
-    return crypto.createHash('md5').update(content).digest('hex');
-  }
-
   analyze(content: string, filename: string): AnalysisResult {
-    const hash = this.computeHash(content);
+    const hash = computeHash(content);
     const cached = this.cache.get(filename);
     
     if (cached && cached.hash === hash) {

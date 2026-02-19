@@ -1,21 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import * as crypto from 'crypto';
-import type { AnalysisResult, AnalyzeRequest } from '../types';
+import type { AnalysisResult, AnalyzeRequest, WorkspaceFile } from '../types';
 import { EXTENSION_ID } from '../constants';
+import { computeHash } from '../utils/hash';
+import { isJsTsFile, isGoFile, isPythonFile } from '../utils/fileUtils';
 import { NativeJsAnalyzer } from './nativeJsAnalyzer';
 
 let wasmInitialized = false;
 let analyzeCodeFn: any = null;
 let analyzeWorkspaceFn: any = null;
 let detectLanguageFn: any = null;
-
-interface WorkspaceFile {
-  content: string;
-  filename: string;
-  hash?: string;
-}
 
 export class WasmService {
   private wasmModule: any = null;
@@ -26,23 +21,6 @@ export class WasmService {
 
   constructor() {
     this.nativeJsAnalyzer = new NativeJsAnalyzer();
-  }
-
-  private computeHash(content: string): string {
-    return crypto.createHash('md5').update(content).digest('hex');
-  }
-
-  private isJsTsFile(filename: string): boolean {
-    const ext = filename.toLowerCase().split('.').pop();
-    return ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'vue', 'svelte'].includes(ext || '');
-  }
-
-  private isGoFile(filename: string): boolean {
-    return filename.toLowerCase().endsWith('.go');
-  }
-
-  private isPythonFile(filename: string): boolean {
-    return filename.toLowerCase().endsWith('.py');
   }
 
   async initialize(): Promise<void> {
@@ -137,9 +115,9 @@ export class WasmService {
     const wasmFiles: WorkspaceFile[] = [];
 
     for (const file of files) {
-      if (this.isJsTsFile(file.filename)) {
+      if (isJsTsFile(file.filename)) {
         jsTsFiles.push(file);
-      } else if (this.isGoFile(file.filename) || this.isPythonFile(file.filename)) {
+      } else if (isGoFile(file.filename) || isPythonFile(file.filename)) {
         wasmFiles.push(file);
       }
     }
@@ -174,7 +152,7 @@ export class WasmService {
 
     const filesWithHash = files.map(f => ({
       ...f,
-      hash: this.computeHash(f.content)
+      hash: computeHash(f.content)
     }));
 
     const cachedResults = new Map<string, AnalysisResult>();
@@ -212,7 +190,7 @@ export class WasmService {
 
       for (const [filename, analysisResult] of Object.entries(parsed.results)) {
         const res = analysisResult as AnalysisResult;
-        this.cache.set(filename, { hash: this.computeHash(files.find(f => f.filename === filename)?.content || ''), result: res });
+        this.cache.set(filename, { hash: computeHash(files.find(f => f.filename === filename)?.content || ''), result: res });
         cachedResults.set(filename, res);
       }
       
@@ -224,7 +202,7 @@ export class WasmService {
   }
 
   async analyze(request: AnalyzeRequest): Promise<AnalysisResult> {
-    if (this.isJsTsFile(request.filename)) {
+    if (isJsTsFile(request.filename)) {
       return this.nativeJsAnalyzer.analyze(request.content, request.filename);
     }
 
@@ -234,7 +212,7 @@ export class WasmService {
   private async analyzeWasm(request: AnalyzeRequest): Promise<AnalysisResult> {
     await this.ensureInitialized();
 
-    const contentHash = this.computeHash(request.content);
+    const contentHash = computeHash(request.content);
     
     const cached = this.cache.get(request.filename);
     if (cached && cached.hash === contentHash) {
@@ -283,7 +261,7 @@ export class WasmService {
   }
 
   detectLanguage(filename: string): string {
-    if (this.isJsTsFile(filename)) {
+    if (isJsTsFile(filename)) {
       return 'javascript/typescript';
     }
     

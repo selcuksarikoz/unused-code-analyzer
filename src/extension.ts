@@ -3,6 +3,8 @@ import * as path from 'path';
 import type { AnalysisResult, CodeIssue } from './types';
 import { WasmService } from './services/wasmService';
 import { WebviewProvider } from './providers/webviewProvider';
+import { computeHash } from './utils/hash';
+import { isRelevantFile, detectLanguage } from './utils/fileUtils';
 import {
     DEFAULT_EXCLUDE_FOLDERS,
     DEFAULT_FILE_EXTENSIONS,
@@ -140,7 +142,7 @@ class Extension implements vscode.Disposable {
     private isScanning = false;
     private decorationCollection: vscode.TextEditorDecorationType[] = [];
     private autoAnalyzeTimeout: ReturnType<typeof setTimeout> | undefined;
-    private lastAnalyzedFiles: Map<string, string> = new Map();
+    private fileHashes: Map<string, string> = new Map();
 
     constructor(private context: vscode.ExtensionContext) {
         this.wasmService = new WasmService();
@@ -162,23 +164,11 @@ class Extension implements vscode.Disposable {
         return config.get<number>('autoAnalyzeDelay', DEFAULT_AUTO_ANALYZE_DELAY);
     }
 
-    private isRelevantFile(filePath: string): boolean {
+    private checkRelevantFile(filePath: string): boolean {
         const config = vscode.workspace.getConfiguration('get-unused-imports');
         const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
         const excludeFolders = config.get<string[]>('excludeFolders', DEFAULT_EXCLUDE_FOLDERS);
-        
-        const ext = filePath.split('.').pop()?.toLowerCase() || '';
-        if (!extensions.includes(ext)) {
-            return false;
-        }
-        
-        for (const folder of excludeFolders) {
-            if (filePath.includes('/' + folder + '/') || filePath.endsWith('/' + folder)) {
-                return false;
-            }
-        }
-        
-        return true;
+        return isRelevantFile(filePath, extensions, excludeFolders);
     }
 
     private registerEventHandlers(): void {
@@ -196,7 +186,7 @@ class Extension implements vscode.Disposable {
                 }
                 
                 const filePath = doc.uri.fsPath;
-                if (!this.isRelevantFile(filePath)) {
+                if (!this.checkRelevantFile(filePath)) {
                     return;
                 }
 
@@ -211,7 +201,7 @@ class Extension implements vscode.Disposable {
                 }
                 
                 const filePath = event.document.uri.fsPath;
-                if (!this.isRelevantFile(filePath)) {
+                if (!this.checkRelevantFile(filePath)) {
                     return;
                 }
 
@@ -232,6 +222,17 @@ class Extension implements vscode.Disposable {
 
     private async analyzeSingleFile(filePath: string, content: string, language: string): Promise<void> {
         try {
+            const contentHash = computeHash(content);
+            const cachedHash = this.fileHashes.get(filePath);
+            
+            if (cachedHash === contentHash) {
+                console.log('[Extension] File unchanged, skipping:', filePath);
+                return;
+            }
+            
+            console.log('[Extension] File changed, analyzing:', filePath);
+            this.fileHashes.set(filePath, contentHash);
+
             const result = await this.wasmService.analyze({ 
                 content, 
                 filename: filePath, 
@@ -411,6 +412,7 @@ class Extension implements vscode.Disposable {
 
         this.isScanning = true;
         this.treeProvider.clear();
+        this.fileHashes.clear();
         vscode.window.showInformationMessage('Scanning workspace for unused code...');
 
         const files = await vscode.workspace.findFiles(this.getFileExtensions(), this.getExcludePattern());
@@ -427,6 +429,8 @@ class Extension implements vscode.Disposable {
             try {
                 const doc = await vscode.workspace.openTextDocument(file.fsPath);
                 const content = doc.getText();
+                const hash = computeHash(content);
+                this.fileHashes.set(file.fsPath, hash);
                 workspaceFiles.push({
                     content,
                     filename: file.fsPath
@@ -473,6 +477,8 @@ class Extension implements vscode.Disposable {
 
             const doc = await vscode.workspace.openTextDocument(uri);
             const content = doc.getText();
+            const hash = computeHash(content);
+            this.fileHashes.set(uri.fsPath, hash);
             
             const workspaceFiles: { content: string; filename: string }[] = [];
             workspaceFiles.push({
@@ -525,8 +531,11 @@ class Extension implements vscode.Disposable {
         for (const file of files) {
             try {
                 const doc = await vscode.workspace.openTextDocument(file.fsPath);
+                const content = doc.getText();
+                const hash = computeHash(content);
+                this.fileHashes.set(file.fsPath, hash);
                 workspaceFiles.push({
-                    content: doc.getText(),
+                    content,
                     filename: file.fsPath
                 });
             } catch (error) {
