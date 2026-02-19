@@ -20,10 +20,9 @@ A VS Code extension to detect unused imports, variables, and parameters in your 
 
 ## Features
 
-- **Multi-language Support**: TypeScript, JavaScript, Python, Go
+- **Multi-language Support**: TypeScript, JavaScript, Python, Go, Ruby, PHP
 - **Auto Analyzer**: Automatically analyzes files on save and when TreeView is opened
 - **Tree View**: Results displayed in Explorer sidebar
-- **Webview**: Detailed view with tabbed interface
 - **Quick Navigation**: Click to jump to unused code
 - **High Performance**: Go backend compiled to WebAssembly with intelligent caching
 
@@ -42,7 +41,6 @@ Or install from [VS Code Marketplace](https://marketplace.visualstudio.com/items
 - `Get Unused: Scan Workspace` - Analyze entire workspace
 - `Get Unused: Scan File` - Analyze current file
 - `Get Unused: Scan Folder` - Analyze selected folder
-- `Get Unused: Analyzer` - Open webview
 
 ### Auto Analyzer
 The extension automatically analyzes files when:
@@ -62,30 +60,35 @@ Open "Unused Code" view in Explorer sidebar. Results are shown with:
 |---------|---------|-------------|
 | `get-unused-imports.autoAnalyzer` | `true` | Automatically analyze on save |
 | `get-unused-imports.autoAnalyzeDelay` | `500` | Delay in ms before auto-analyzing |
-| `get-unused-imports.fileExtensions` | `["ts", "tsx", "js", "jsx", "vue", "svelte", "py", "go"]` | File extensions to scan |
+| `get-unused-imports.fileExtensions` | `["ts", "tsx", "js", "jsx", "vue", "svelte", "py", "go", "rb", "php"]` | File extensions to scan |
 | `get-unused-imports.excludeFolders` | `["node_modules", ".next", "dist", "build", "out", ".git"]` | Folders to exclude |
 
 ## Supported Languages
 
-| Language | Extensions |
-|----------|------------|
-| TypeScript | .ts, .tsx |
-| JavaScript | .js, .jsx, .vue, .svelte |
-| Python | .py |
-| Go | .go |
+| Language | Extensions | Backend |
+|----------|------------|---------|
+| TypeScript | .ts, .tsx | Native (ts-morph) |
+| JavaScript | .js, .jsx, .vue, .svelte | Native (ts-morph) |
+| Python | .py | WASM (go-python) |
+| Go | .go | WASM (go/parser) |
+| Ruby | .rb | WASM (regex-based) |
+| PHP | .php | WASM (regex-based) |
 
 ## Architecture
 
 - **Backend**: Go → WebAssembly
 - **Frontend**: TypeScript + VS Code API
-- **UI**: Tailwind CSS + Material Icons
-- **Caching**: SHA256 hash-based caching for fast incremental analysis
+- **UI**: Tailwind CSS
+- **Caching**: MD5 hash-based caching for fast incremental analysis
 
 ## Development
 
 ```bash
 # Install dependencies
 npm install
+
+# Build WASM (from backend directory)
+cd backend && GOOS=js GOARCH=wasm go build -o ../out/main.wasm .
 
 # Build extension
 npm run build
@@ -94,3 +97,9 @@ npm run build
 ## License
 
 MIT License - see [LICENSE](LICENSE)
+
+---
+
+<p align="center">
+  <strong>☕ Enjoying Get Unused Imports? <a href="https://buymeacoffee.com/funnyturkishdude">Buy me a coffee</a> or leave a rating on the <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.get-unused-imports">Marketplace</a>!</strong>
+</p>

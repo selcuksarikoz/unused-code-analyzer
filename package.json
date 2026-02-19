@@ -1,7 +1,7 @@
 {
   "name": "get-unused-imports",
   "displayName": "Get Unused Imports",
-  "description": "Detect unused imports, variables, and parameters in your codebase",
+  "description": "Detect and remove unused imports, variables, and parameters in TypeScript, JavaScript, Python, Go, Ruby, and PHP code",
   "version": "0.1.0",
   "publisher": "selcuksarikoz",
   "repository": {
@@ -13,7 +13,24 @@
     "vscode": "^1.109.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Linters"
+  ],
+  "keywords": [
+    "unused",
+    "imports",
+    "variables",
+    "parameters",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "ruby",
+    "php",
+    "clean",
+    "code",
+    "lint",
+    "analyzer"
   ],
   "main": "./out/extension.js",
   "contributes": {
