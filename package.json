@@ -42,7 +42,9 @@
             "vue",
             "svelte",
             "py",
-            "go"
+            "go",
+            "rb",
+            "php"
           ],
           "description": "File extensions to scan"
         },

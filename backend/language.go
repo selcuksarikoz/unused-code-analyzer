@@ -44,6 +44,10 @@ func DetectLanguage(filename string) Language {
 		return LangPython
 	case ".go":
 		return LangGo
+	case ".rb":
+		return LangRuby
+	case ".php":
+		return LangPHP
 	default:
 		return LangUnknown
 	}

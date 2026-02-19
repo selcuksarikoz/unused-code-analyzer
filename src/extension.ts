@@ -188,6 +188,7 @@ class Extension implements vscode.Disposable {
                 }
                 
                 const filePath = doc.uri.fsPath;
+                console.log('[Extension] onDidSaveTextDocument:', filePath, 'isRelevant:', this.checkRelevantFile(filePath));
                 if (!this.checkRelevantFile(filePath)) {
                     return;
                 }
@@ -203,6 +204,7 @@ class Extension implements vscode.Disposable {
                 }
                 
                 const filePath = event.document.uri.fsPath;
+                console.log('[Extension] onDidChangeTextDocument:', filePath, 'isRelevant:', this.checkRelevantFile(filePath));
                 if (!this.checkRelevantFile(filePath)) {
                     return;
                 }
@@ -224,6 +226,8 @@ class Extension implements vscode.Disposable {
 
     private async analyzeSingleFile(filePath: string, content: string, language: string): Promise<void> {
         try {
+            console.log('[Extension] analyzeSingleFile called:', filePath, 'language:', language);
+            
             const contentHash = computeHash(content);
             const cachedHash = this.fileHashes.get(filePath);
             
@@ -240,6 +244,8 @@ class Extension implements vscode.Disposable {
                 filename: filePath, 
                 language 
             });
+
+            console.log('[Extension] Analysis result:', filePath, 'imports:', result.imports.length, 'variables:', result.variables.length, 'parameters:', result.parameters.length);
 
             const totalIssues = result.imports.length + result.variables.length + result.parameters.length;
             
@@ -475,6 +481,8 @@ class Extension implements vscode.Disposable {
 
     private async scanFile(uri: vscode.Uri): Promise<void> {
         try {
+            vscode.commands.executeCommand('workbench.view.extension.get-unused-imports');
+            
             if (uri.fsPath.includes('.') === false) {
                 vscode.window.showInformationMessage('Please select a file, not a folder');
                 return;
@@ -517,6 +525,8 @@ class Extension implements vscode.Disposable {
             return;
         }
 
+        vscode.commands.executeCommand('workbench.view.extension.get-unused-imports');
+        
         this.isScanning = true;
         this.treeProvider.clear();
         vscode.window.showInformationMessage('Scanning folder...');

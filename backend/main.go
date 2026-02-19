@@ -56,6 +56,10 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 		result = analyzePython(req.Content, req.Filename)
 	case LangGo:
 		result = analyzeGo(req.Content, req.Filename)
+	case LangRuby:
+		result = analyzeRuby(req.Content, req.Filename)
+	case LangPHP:
+		result = analyzePHP(req.Content, req.Filename)
 	default:
 		fmt.Printf("[Analyzer] Unknown language for: %s\n", req.Filename)
 		result = AnalysisResult{}
@@ -85,6 +89,14 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 			a.allImports[file.Filename] = imports
 		case LangGo:
 			defs, imports, _, _ := analyzeGoForWorkspace(file.Content, file.Filename)
+			a.allDefinitions[file.Filename] = defs
+			a.allImports[file.Filename] = imports
+		case LangRuby:
+			defs, imports, _, _ := analyzeRubyForWorkspace(file.Content, file.Filename)
+			a.allDefinitions[file.Filename] = defs
+			a.allImports[file.Filename] = imports
+		case LangPHP:
+			defs, imports, _, _ := analyzePHPForWorkspace(file.Content, file.Filename)
 			a.allDefinitions[file.Filename] = defs
 			a.allImports[file.Filename] = imports
 		}
@@ -139,6 +151,12 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangGo:
 			results[file.Filename] = buildResultGo(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
+		case LangRuby:
+			results[file.Filename] = analyzeRuby(file.Content, file.Filename)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
+		case LangPHP:
+			results[file.Filename] = analyzePHP(file.Content, file.Filename)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		default:
 			results[file.Filename] = AnalysisResult{}

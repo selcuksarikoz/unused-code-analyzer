@@ -15,6 +15,14 @@ export function isPythonFile(filename: string): boolean {
     return filename.toLowerCase().endsWith('.py');
 }
 
+export function isRubyFile(filename: string): boolean {
+    return filename.toLowerCase().endsWith('.rb');
+}
+
+export function isPHPFile(filename: string): boolean {
+    return filename.toLowerCase().endsWith('.php');
+}
+
 export function detectLanguage(filename: string): string {
     const ext = getFileExtension(filename);
     switch (ext) {
@@ -34,6 +42,10 @@ export function detectLanguage(filename: string): string {
             return 'python';
         case 'go':
             return 'go';
+        case 'rb':
+            return 'ruby';
+        case 'php':
+            return 'php';
         default:
             return 'unknown';
     }

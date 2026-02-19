@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import type { AnalysisResult, AnalyzeRequest, WorkspaceFile } from '../types';
 import { EXTENSION_ID } from '../constants';
 import { computeHash } from '../utils/hash';
-import { isJsTsFile, isGoFile, isPythonFile } from '../utils/fileUtils';
+import { isJsTsFile, isGoFile, isPythonFile, isRubyFile, isPHPFile } from '../utils/fileUtils';
 import { NativeJsAnalyzer } from './nativeJsAnalyzer';
 
 let wasmInitialized = false;
@@ -117,7 +117,7 @@ export class WasmService {
     for (const file of files) {
       if (isJsTsFile(file.filename)) {
         jsTsFiles.push(file);
-      } else if (isGoFile(file.filename) || isPythonFile(file.filename)) {
+      } else if (isGoFile(file.filename) || isPythonFile(file.filename) || isRubyFile(file.filename) || isPHPFile(file.filename)) {
         wasmFiles.push(file);
       }
     }
