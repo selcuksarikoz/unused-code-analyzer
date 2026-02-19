@@ -223,72 +223,66 @@ export class NativeJsAnalyzer {
     const variables: VariableInfo[] = [];
     const seenNames = new Set<string>();
 
+    const addVariable = (name: string, line: number, type: string, isExported: boolean) => {
+      if (seenNames.has(name) || isGlobalIdentifier(name)) return;
+      seenNames.add(name);
+      variables.push({ name, line, type: type as VariableInfo['type'], exported: isExported });
+    };
+
+    const checkExported = (node: ts.Node): boolean => {
+      let current: ts.Node | undefined = node.parent;
+      while (current) {
+        if (ts.isVariableStatement(current)) {
+          return current.modifiers?.some((m: ts.ModifierLike) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+        }
+        if (ts.isFunctionDeclaration(current) || ts.isClassDeclaration(current) || 
+            ts.isInterfaceDeclaration(current) || ts.isTypeAliasDeclaration(current) ||
+            ts.isEnumDeclaration(current)) {
+          return current.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+        }
+        current = current.parent;
+      }
+      return false;
+    };
+
     const visit = (node: ts.Node) => {
-      // Variable declarations
+      // Variable declarations - simple: const foo = ...
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
         const name = node.name.text;
-        if (seenNames.has(name)) return;
-        
         const line = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line + 1;
-        
-        let isExported = false;
-        let current: ts.Node | undefined = node.parent;
-        while (current) {
-          if (ts.isVariableStatement(current)) {
-            isExported = current.modifiers?.some((m: ts.ModifierLike) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
-            break;
-          }
-          current = current.parent;
-        }
-
-        if (!isGlobalIdentifier(name)) {
-          seenNames.add(name);
-          variables.push({
-            name,
-            line,
-            type: 'var',
-            exported: isExported,
-          });
-        }
+        addVariable(name, line, 'var', checkExported(node));
       } 
+      // Variable declarations - destructuring: const { a, b } = ...
+      else if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name)) {
+        const line = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line + 1;
+        this.extractBindingNames(node.name).forEach(name => {
+          addVariable(name, line, 'var', checkExported(node));
+        });
+      }
+      // Variable declarations - array destructuring: const [a, b] = ...
+      else if (ts.isVariableDeclaration(node) && ts.isArrayBindingPattern(node.name)) {
+        const line = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line + 1;
+        this.extractBindingNames(node.name).forEach(name => {
+          addVariable(name, line, 'var', checkExported(node));
+        });
+      }
       // Function declarations
       else if (ts.isFunctionDeclaration(node) && node.name) {
         const name = node.name.text;
-        if (seenNames.has(name)) return;
-        
         const line = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line + 1;
-        const isExported = node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
-        
-        seenNames.add(name);
-        variables.push({
-          name,
-          line,
-          type: 'function',
-          exported: !!isExported,
-        });
+        addVariable(name, line, 'function', checkExported(node));
       } 
       // Class declarations
       else if (ts.isClassDeclaration(node) && node.name) {
         const name = node.name.text;
-        if (seenNames.has(name)) return;
-        
         const line = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart()).line + 1;
-        const isExported = node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
-        
-        seenNames.add(name);
-        variables.push({
-          name,
-          line,
-          type: 'class',
-          exported: !!isExported,
-        });
-      } 
+        addVariable(name, line, 'class', checkExported(node));
+      }
       // Interface declarations
       else if (ts.isInterfaceDeclaration(node) && node.name) {
         const name = node.name.text;
         if (seenNames.has(name)) return;
         
-        // Skip interfaces inside declare global blocks - they're augmenting global types
         if (this.isInsideDeclareGlobal(node)) {
           return;
         }
@@ -309,7 +303,6 @@ export class NativeJsAnalyzer {
         const name = node.name.text;
         if (seenNames.has(name)) return;
         
-        // Skip type aliases inside declare global blocks
         if (this.isInsideDeclareGlobal(node)) {
           return;
         }
@@ -347,6 +340,23 @@ export class NativeJsAnalyzer {
 
     visit(sourceFile);
     return variables;
+  }
+
+  private extractBindingNames(pattern: ts.BindingPattern): string[] {
+    const names: string[] = [];
+
+    const visit = (element: ts.BindingElement | ts.ArrayBindingElement) => {
+      if (ts.isBindingElement(element)) {
+        if (ts.isIdentifier(element.name)) {
+          names.push(element.name.text);
+        } else if (ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name)) {
+          this.extractBindingNames(element.name).forEach((n) => names.push(n));
+        }
+      }
+    };
+
+    pattern.elements.forEach(visit);
+    return names;
   }
 
   private findParameters(sourceFile: ts.SourceFile): ParameterInfo[] {
