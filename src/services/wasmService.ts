@@ -4,8 +4,7 @@ import * as fs from 'fs';
 import type { AnalysisResult, AnalyzeRequest, WorkspaceFile } from '../types';
 import { EXTENSION_ID } from '../constants';
 import { computeHash } from '../utils/hash';
-import { isJsTsFile, isGoFile, isPythonFile, isRubyFile, isPHPFile } from '../utils/fileUtils';
-import { NativeJsAnalyzer } from './nativeJsAnalyzer';
+import { isJsTsFile } from '../utils/fileUtils';
 
 let wasmInitialized = false;
 let analyzeCodeFn: any = null;
@@ -17,19 +16,30 @@ export class WasmService {
   private extensionId = EXTENSION_ID;
   private cache: Map<string, { hash: string; result: AnalysisResult }> = new Map();
   private workspaceHashes: Map<string, string> = new Map();
-  private nativeJsAnalyzer: NativeJsAnalyzer;
+  private analyzerChecked = false;
 
   constructor() {
-    this.nativeJsAnalyzer = new NativeJsAnalyzer();
   }
 
-  async initialize(): Promise<void> {
+  private async detectBestAnalyzer(): Promise<'tsserver'> {
+    if (this.analyzerChecked) {
+      return 'tsserver';
+    }
+
+    console.log('[WASMService] Using WASM analyzer');
+    this.analyzerChecked = true;
+    return 'tsserver';
+  }
+
+  async initialize(forceWasmLoad = false): Promise<void> {
+    await this.detectBestAnalyzer();
+
+    if (!forceWasmLoad) return;
+    
     if (wasmInitialized) {
       console.log('[WASMService] WASM already initialized');
       return;
     }
-    
-    console.log('[WASMService] Starting initialization...');
     
     const timeoutMs = 30000;
     const timeoutPromise = new Promise((_, reject) => 
@@ -106,40 +116,15 @@ export class WasmService {
 
   async ensureInitialized(): Promise<void> {
     if (!wasmInitialized) {
-      await this.initialize();
+      await this.initialize(true);
     }
   }
 
   async analyzeWorkspace(files: WorkspaceFile[]): Promise<Map<string, AnalysisResult>> {
-    const jsTsFiles: WorkspaceFile[] = [];
-    const wasmFiles: WorkspaceFile[] = [];
-
-    for (const file of files) {
-      if (isJsTsFile(file.filename)) {
-        jsTsFiles.push(file);
-      } else if (isGoFile(file.filename) || isPythonFile(file.filename) || isRubyFile(file.filename) || isPHPFile(file.filename)) {
-        wasmFiles.push(file);
-      }
+    if (!this.analyzerChecked) {
+      await this.detectBestAnalyzer();
     }
-
-    const results = new Map<string, AnalysisResult>();
-
-    if (jsTsFiles.length > 0) {
-      console.log(`[WASMService] Analyzing ${jsTsFiles.length} JS/TS files natively...`);
-      const jsResults = this.nativeJsAnalyzer.analyzeWorkspace(jsTsFiles);
-      for (const [filename, result] of jsResults) {
-        results.set(filename, result);
-      }
-    }
-
-    if (wasmFiles.length > 0) {
-      const wasmResults = await this.analyzeWorkspaceWasm(wasmFiles);
-      for (const [filename, result] of wasmResults) {
-        results.set(filename, result);
-      }
-    }
-
-    return results;
+    return this.analyzeWorkspaceWasm(files);
   }
 
   private async analyzeWorkspaceWasm(files: WorkspaceFile[]): Promise<Map<string, AnalysisResult>> {
@@ -209,10 +194,9 @@ export class WasmService {
   }
 
   async analyze(request: AnalyzeRequest): Promise<AnalysisResult> {
-    if (isJsTsFile(request.filename)) {
-      return this.nativeJsAnalyzer.analyze(request.content, request.filename);
+    if (!this.analyzerChecked) {
+      await this.detectBestAnalyzer();
     }
-
     return this.analyzeWasm(request);
   }
 

@@ -4,7 +4,7 @@
 # Include necessary files and directories
 !out/**
 !assets/**
-!node_modules/typescript/**
+# !node_modules/typescript/**
 !LICENSE
 !README.md
 !package.json
@@ -12,6 +12,7 @@
 # Exclude .DS_Store files everywhere
 **/.DS_Store
 assets/.DS_Store
+
 
 # Exclude dev directories and files
 .git/**

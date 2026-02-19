@@ -52,6 +52,8 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 
 	var result AnalysisResult
 	switch lang {
+	case LangJavaScript, LangTypeScript:
+		result = analyzeJSTS(req.Content, req.Filename)
 	case LangPython:
 		result = analyzePython(req.Content, req.Filename)
 	case LangGo:
@@ -83,6 +85,10 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		fmt.Printf("[Analyzer] Workspace file: %s, lang: %s\n", file.Filename, lang)
 
 		switch lang {
+		case LangJavaScript, LangTypeScript:
+			defs, imports, _, _ := analyzeJSTSForWorkspace(file.Content, file.Filename)
+			a.allDefinitions[file.Filename] = defs
+			a.allImports[file.Filename] = imports
 		case LangPython:
 			defs, imports, _, _ := analyzePythonForWorkspace(file.Content, file.Filename)
 			a.allDefinitions[file.Filename] = defs
@@ -132,7 +138,7 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	for _, file := range req.Files {
 		for _, def := range a.allDefinitions[file.Filename] {
 			if def.Exported {
-				isUsed := isExportedUsedInOtherFiles(req.Files, file.Filename, def.Name)
+				isUsed := a.isExportedUsedInOtherFiles(req.Files, file.Filename, def.Name)
 				if isUsed {
 					usedNames[def.Name+"@"+file.Filename] = true
 				}
@@ -146,6 +152,9 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		lang := DetectLanguage(file.Filename)
 
 		switch lang {
+		case LangJavaScript, LangTypeScript:
+			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
 			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
@@ -184,7 +193,7 @@ func isNameUsedInOtherFiles(files []AnalyzeFile, excludeFilename, name string) b
 	return false
 }
 
-func isExportedUsedInOtherFiles(files []AnalyzeFile, excludeFilename, name string) bool {
+func (a *MultiLangAnalyzer) isExportedUsedInOtherFiles(files []AnalyzeFile, excludeFilename, name string) bool {
 	for _, f := range files {
 		if f.Filename == excludeFilename {
 			continue

@@ -323,13 +323,13 @@ class Extension implements vscode.Disposable {
         );
 
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('get-unused-imports.scanFile', async (uri: vscode.Uri) => {
+            vscode.commands.registerCommand('get-unused-imports.scanFile', async (uri?: vscode.Uri) => {
                 await this.scanFile(uri);
             })
         );
 
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('get-unused-imports.scanFolder', async (uri: vscode.Uri) => {
+            vscode.commands.registerCommand('get-unused-imports.scanFolder', async (uri?: vscode.Uri) => {
                 await this.scanFolder(uri);
             })
         );
@@ -386,7 +386,7 @@ class Extension implements vscode.Disposable {
     }
 
     private registerTreeView(): void {
-        this.treeView = vscode.window.createTreeView('results', {
+        this.treeView = vscode.window.createTreeView('get-unused-imports.results', {
             treeDataProvider: this.treeProvider,
             showCollapseAll: true
         });
@@ -479,36 +479,42 @@ class Extension implements vscode.Disposable {
         vscode.window.showInformationMessage(`Scan complete! Found ${totalResults} files with issues.`);
     }
 
-    private async scanFile(uri: vscode.Uri): Promise<void> {
+    private async scanFile(uri?: vscode.Uri): Promise<void> {
         try {
             vscode.commands.executeCommand('workbench.view.extension.get-unused-imports');
-            
-            if (uri.fsPath.includes('.') === false) {
+
+            const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+            if (!targetUri) {
+                vscode.window.showInformationMessage('No file selected or active editor found');
+                return;
+            }
+
+            if (targetUri.fsPath.includes('.') === false) {
                 vscode.window.showInformationMessage('Please select a file, not a folder');
                 return;
             }
 
-            const doc = await vscode.workspace.openTextDocument(uri);
+            const doc = await vscode.workspace.openTextDocument(targetUri);
             const content = doc.getText();
             const hash = computeHash(content);
-            this.fileHashes.set(uri.fsPath, hash);
+            this.fileHashes.set(targetUri.fsPath, hash);
             
             const workspaceFiles: { content: string; filename: string }[] = [];
             workspaceFiles.push({
                 content,
-                filename: uri.fsPath
+                filename: targetUri.fsPath
             });
 
             const resultsMap = await this.wasmService.analyzeWorkspace(workspaceFiles);
             
-            const result = resultsMap.get(uri.fsPath);
+            const result = resultsMap.get(targetUri.fsPath);
             if (!result) {
                 vscode.window.showInformationMessage('No issues found');
                 return;
             }
             
             const fileIssue: FileIssue = {
-                file: vscode.workspace.asRelativePath(uri.fsPath),
+                file: vscode.workspace.asRelativePath(targetUri.fsPath),
                 issues: result
             };
             
@@ -519,13 +525,19 @@ class Extension implements vscode.Disposable {
         }
     }
 
-    private async scanFolder(uri: vscode.Uri): Promise<void> {
+    private async scanFolder(uri?: vscode.Uri): Promise<void> {
         if (this.isScanning) {
             vscode.window.showInformationMessage('Already scanning...');
             return;
         }
 
         vscode.commands.executeCommand('workbench.view.extension.get-unused-imports');
+
+        const targetUri = uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!targetUri) {
+            vscode.window.showInformationMessage('No folder selected and no workspace is open');
+            return;
+        }
         
         this.isScanning = true;
         this.treeProvider.clear();
@@ -536,7 +548,7 @@ class Extension implements vscode.Disposable {
         
         const allFiles: vscode.Uri[] = [];
         for (const ext of extensions) {
-            const pattern = new vscode.RelativePattern(uri.fsPath, `**/*.${ext}`);
+            const pattern = new vscode.RelativePattern(targetUri.fsPath, `**/*.${ext}`);
             const files = await vscode.workspace.findFiles(pattern, this.getExcludePattern());
             allFiles.push(...files);
         }
@@ -594,9 +606,15 @@ class Extension implements vscode.Disposable {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log('[Extension] Starting activation...');
     const ext = new Extension(context);
-    console.log('[Extension] Extension created, initializing WASM...');
-    await ext.init();
-    console.log('[Extension] Activation complete');
+    context.subscriptions.push(ext);
+    console.log('[Extension] Extension created, initializing analyzers...');
+    try {
+        await ext.init();
+        console.log('[Extension] Activation complete');
+    } catch (error) {
+        console.error('[Extension] Initialization failed, extension will continue in degraded mode:', error);
+        vscode.window.showWarningMessage('Get Unused Imports initialized with limited capabilities. JS/TS analysis is still available.');
+    }
 }
 
 export function deactivate(): void {}
