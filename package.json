@@ -1,0 +1,176 @@
+{
+  "name": "get-unused-imports",
+  "displayName": "Get Unused Imports",
+  "description": "Detect unused imports, variables, and parameters in your codebase",
+  "version": "0.1.0",
+  "publisher": "selcuksarikoz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/selcuksarikoz/get-unused-imports"
+  },
+  "icon": "assets/icons/logo.png",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "files": [
+    "out/**/*",
+    "assets/**/*",
+    "LICENSE",
+    "README.md"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Get Unused Imports",
+      "properties": {
+        "get-unused-imports.excludeFolders": {
+          "type": "array",
+          "default": [
+            "node_modules",
+            ".next",
+            "dist",
+            "build",
+            "out",
+            ".git"
+          ],
+          "description": "Folders to exclude from scanning"
+        },
+        "get-unused-imports.fileExtensions": {
+          "type": "array",
+          "default": [
+            "ts",
+            "tsx",
+            "js",
+            "jsx",
+            "vue",
+            "svelte",
+            "py",
+            "go"
+          ],
+          "description": "File extensions to scan"
+        },
+        "get-unused-imports.autoAnalyzer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save and when treeview is opened"
+        },
+        "get-unused-imports.autoAnalyzeDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "Delay in ms before auto-analyzing after file changes"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "get-unused-imports.scanWorkspace",
+        "title": "Get Unused: Scan Workspace"
+      },
+      {
+        "command": "get-unused-imports.scanFile",
+        "title": "Get Unused: Scan File"
+      },
+      {
+        "command": "get-unused-imports.scanFolder",
+        "title": "Get Unused: Scan Folder"
+      },
+      {
+        "command": "get-unused-imports.openWebview",
+        "title": "Get Unused: Analyzer"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "get-unused-imports.scanWorkspace",
+          "when": "editorTextFocus",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "get-unused-imports.scanWorkspace",
+          "title": "Get Unused: Scan Workspace"
+        },
+        {
+          "command": "get-unused-imports.scanFile",
+          "title": "Get Unused: Scan File"
+        },
+        {
+          "command": "get-unused-imports.scanFolder",
+          "title": "Get Unused: Scan Folder"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "get-unused-imports.scanFile",
+          "when": "editorFocus",
+          "title": "Get Unused: Scan File"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "get-unused-imports.scanFile",
+          "when": "explorerResourceIsFolder == false",
+          "title": "Get Unused: Scan File"
+        },
+        {
+          "command": "get-unused-imports.scanFolder",
+          "when": "explorerResourceIsFolder",
+          "title": "Get Unused: Scan Folder"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "get-unused-imports.scanWorkspace",
+          "when": "view == results",
+          "title": "Scan Workspace",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "get-unused-imports.openWebview",
+          "when": "view == results",
+          "title": "Analyzer",
+          "icon": "$(open-preview)"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "get-unused-imports",
+          "title": "Unused Code",
+          "icon": "assets/icons/toolbar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "get-unused-imports": [
+        {
+          "id": "results",
+          "name": "Results",
+          "when": "true"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.11",
+    "@types/vscode": "^1.109.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+  }
+}
