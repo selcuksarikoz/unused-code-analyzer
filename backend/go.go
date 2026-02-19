@@ -114,13 +114,10 @@ func findGoDefinitionsForWorkspace(f *ast.File, fset *token.FileSet, filename st
 			}
 		case *ast.FuncDecl:
 			if decl.Name != nil && decl.Name.Name != "" {
-				isExported := len(decl.Name.Name) > 0 && decl.Name.Name[0] >= 'A' && decl.Name.Name[0] <= 'Z'
-				if isExported {
-					variables = append(variables, goVar{
-						name: decl.Name.Name,
-						line: fset.Position(decl.Name.Pos()).Line,
-					})
-				}
+				variables = append(variables, goVar{
+					name: decl.Name.Name,
+					line: fset.Position(decl.Name.Pos()).Line,
+				})
 			}
 		}
 		return true
@@ -321,6 +318,48 @@ func findUsedGoNames(content string, imports []goImport, variables []goVar) map[
 	return used
 }
 
+func findUsedGoImportNames(content, filename string) map[string]bool {
+	used := make(map[string]bool)
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	if err != nil {
+		return used
+	}
+
+	declared := make(map[string]bool)
+	for _, spec := range f.Imports {
+		if spec.Name != nil {
+			if spec.Name.Name == "_" || spec.Name.Name == "." {
+				continue
+			}
+			declared[spec.Name.Name] = true
+			continue
+		}
+
+		path := strings.Trim(spec.Path.Value, `"`)
+		parts := strings.Split(path, "/")
+		if len(parts) > 0 {
+			declared[parts[len(parts)-1]] = true
+		}
+	}
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := sel.X.(*ast.Ident); ok {
+			if declared[ident.Name] {
+				used[ident.Name] = true
+			}
+		}
+		return true
+	})
+
+	return used
+}
+
 func filterUnusedImports(imports []goImport, used map[string]bool) []CodeIssue {
 	var issues []CodeIssue
 
@@ -377,6 +416,35 @@ func filterUnusedParams(params []goParam, used map[string]bool) []CodeIssue {
 }
 
 func findGoParametersFromContent(content, filename string) []CodeIssue {
-	// Use AST-based analysis instead of regex
-	return []CodeIssue{}
+	var params []CodeIssue
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	if err != nil {
+		return params
+	}
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok || fn.Type == nil || fn.Type.Params == nil {
+			return true
+		}
+
+		for _, field := range fn.Type.Params.List {
+			for _, name := range field.Names {
+				if name == nil || name.Name == "_" {
+					continue
+				}
+				params = append(params, CodeIssue{
+					ID:   generateUUID(),
+					Line: fset.Position(name.Pos()).Line,
+					Text: "parameter " + name.Name,
+					File: filename,
+				})
+			}
+		}
+		return true
+	})
+
+	return params
 }

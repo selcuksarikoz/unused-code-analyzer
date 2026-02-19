@@ -1,6 +1,9 @@
 package main
 
 import (
+	"regexp"
+	"strings"
+
 	"github.com/go-python/gpython/ast"
 	"github.com/go-python/gpython/parser"
 	"github.com/go-python/gpython/py"
@@ -490,4 +493,36 @@ func findUsedNamesPython(content string, imports []pyItem, variables []pyItem, p
 		items = append(items, NamedItem{Name: item.name, Line: item.line})
 	}
 	return FindUsedNames(content, items)
+}
+
+var (
+	rePythonImportLine = regexp.MustCompile(`^\s*(from\s+\S+\s+import\s+.+|import\s+.+)$`)
+)
+
+func findUsedPythonImportNames(content string, imports []Import) map[string]bool {
+	used := make(map[string]bool)
+	lines := strings.Split(content, "\n")
+
+	for _, imp := range imports {
+		name := imp.Name
+		if name == "" {
+			continue
+		}
+
+		for i, line := range lines {
+			lineNo := i + 1
+			if lineNo == imp.Line {
+				continue
+			}
+			if rePythonImportLine.MatchString(strings.TrimSpace(line)) {
+				continue
+			}
+			if containsWord(line, name) {
+				used[name] = true
+				break
+			}
+		}
+	}
+
+	return used
 }

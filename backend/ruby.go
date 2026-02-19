@@ -11,11 +11,12 @@ func analyzeRuby(content, filename string) AnalysisResult {
 	parameters := findRubyParameters(content)
 	used := findUsedNamesRuby(content, imports, variables)
 	paramUsed := findUsedParameterNames(content, parameters)
+	importUsed := findUsedRubyImportNames(content, imports)
 
 	var unusedImports, unusedVars, unusedParams []CodeIssue
 
 	for _, imp := range imports {
-		if !used[imp.Name] {
+		if !used[imp.Name] && !importUsed[imp.Name] {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.Line,
@@ -220,13 +221,19 @@ func findRubyParametersForWorkspace(content, filename string) []CodeIssue {
 	var params []CodeIssue
 	lines := strings.Split(content, "\n")
 
-	defRe := regexp.MustCompile(`^\s*def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)`)
+	// Supports both:
+	// - def foo(a, b)
+	// - def foo a, b
+	defRe := regexp.MustCompile(`^\s*def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\(([^)]*)\)|\s+([^\n#]+))?`)
 
 	for i, line := range lines {
 		lineNum := i + 1
 
-		if matches := defRe.FindStringSubmatch(line); len(matches) > 1 {
-			args := matches[1]
+		if matches := defRe.FindStringSubmatch(line); len(matches) > 2 {
+			args := strings.TrimSpace(matches[1])
+			if args == "" {
+				args = strings.TrimSpace(matches[2])
+			}
 			if args == "" {
 				continue
 			}
@@ -292,10 +299,12 @@ func importsToRubySlice(imports []Import, filename string) []Import {
 }
 
 func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
+	localImportUsed := findUsedRubyImportNames(file.Content, imports)
+
 	var unusedImports []CodeIssue
 	for _, imp := range imports {
 		key := imp.Name + "@" + file.Filename
-		if !usedNames[key] {
+		if !usedNames[key] && !localImportUsed[imp.Name] {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.Line,
@@ -337,5 +346,79 @@ func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, used
 		Imports:    unusedImports,
 		Variables:  unusedVars,
 		Parameters: unusedParams,
+	}
+}
+
+func findUsedRubyImportNames(content string, imports []Import) map[string]bool {
+	used := make(map[string]bool)
+	lines := strings.Split(content, "\n")
+
+	for _, imp := range imports {
+		if imp.Name == "" {
+			continue
+		}
+
+		candidates := rubyImportCandidates(imp)
+		inBlockComment := false
+		for i, rawLine := range lines {
+			lineNo := i + 1
+			if lineNo == imp.Line {
+				continue
+			}
+
+			line := stripCommentsForUsage(rawLine, &inBlockComment)
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			matched := false
+			for _, c := range candidates {
+				if c == "" {
+					continue
+				}
+				if containsWordInLine(line, c) || strings.Contains(line, c) {
+					used[imp.Name] = true
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+	}
+
+	return used
+}
+
+func rubyImportCandidates(imp Import) []string {
+	source := imp.Source
+	parts := strings.Split(source, "/")
+	first := parts[0]
+	last := parts[len(parts)-1]
+
+	title := func(s string) string {
+		if s == "" {
+			return s
+		}
+		return strings.ToUpper(s[:1]) + s[1:]
+	}
+
+	lastConst := strings.ToUpper(last)
+	firstConst := title(first)
+
+	ns := ""
+	if len(parts) >= 2 {
+		ns = title(parts[0]) + "::" + strings.ToUpper(parts[len(parts)-1])
+	}
+
+	return []string{
+		imp.Name,
+		source,
+		first,
+		last,
+		firstConst,
+		lastConst,
+		ns,
 	}
 }

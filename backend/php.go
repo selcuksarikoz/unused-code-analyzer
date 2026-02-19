@@ -266,7 +266,12 @@ func findPHPParametersForWorkspace(content, filename string) []CodeIssue {
 	var params []CodeIssue
 	lines := strings.Split(content, "\n")
 
-	funcRe := regexp.MustCompile(`^\s*function\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)`)
+	// Supports:
+	// - function foo(...)
+	// - public/protected/private function foo(...)
+	// - static/abstract/final modifiers
+	funcRe := regexp.MustCompile(`^\s*(?:public|protected|private|static|abstract|final|\s)*\s*function\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)`)
+	paramNameRe := regexp.MustCompile(`\$[a-zA-Z_][a-zA-Z0-9_]*`)
 
 	for i, line := range lines {
 		lineNum := i + 1
@@ -281,12 +286,12 @@ func findPHPParametersForWorkspace(content, filename string) []CodeIssue {
 				arg = strings.TrimSpace(arg)
 				arg = strings.Split(arg, "=")[0]
 				arg = strings.TrimSpace(arg)
-
-				if strings.HasPrefix(arg, "$") && arg != "$this" {
+				name := paramNameRe.FindString(arg)
+				if strings.HasPrefix(name, "$") && name != "$this" {
 					params = append(params, CodeIssue{
 						ID:   generateUUID(),
 						Line: lineNum,
-						Text: "parameter " + arg,
+						Text: "parameter " + name,
 						File: filename,
 					})
 				}

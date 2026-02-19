@@ -166,9 +166,19 @@ class Extension implements vscode.Disposable {
         return config.get<number>('autoAnalyzeDelay', DEFAULT_AUTO_ANALYZE_DELAY);
     }
 
+    private getEnabledExtensions(): string[] {
+        const config = vscode.workspace.getConfiguration('get-unused-imports');
+        const configured = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS) || [];
+        const merged = new Set<string>([
+            ...DEFAULT_FILE_EXTENSIONS.map(ext => ext.toLowerCase()),
+            ...configured.map(ext => ext.toLowerCase())
+        ]);
+        return [...merged];
+    }
+
     private checkRelevantFile(filePath: string): boolean {
         const config = vscode.workspace.getConfiguration('get-unused-imports');
-        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        const extensions = this.getEnabledExtensions();
         const excludeFolders = config.get<string[]>('excludeFolders', DEFAULT_EXCLUDE_FOLDERS);
         return isRelevantFile(filePath, extensions, excludeFolders);
     }
@@ -290,14 +300,12 @@ class Extension implements vscode.Disposable {
     }
 
     private getFileExtensions(): string {
-        const config = vscode.workspace.getConfiguration('get-unused-imports');
-        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        const extensions = this.getEnabledExtensions();
         return '**/*.' + extensions[0];
     }
 
     private async getAllFiles(): Promise<vscode.Uri[]> {
-        const config = vscode.workspace.getConfiguration('get-unused-imports');
-        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        const extensions = this.getEnabledExtensions();
         const excludePattern = this.getExcludePattern();
         
         const allFiles: vscode.Uri[] = [];
@@ -543,8 +551,7 @@ class Extension implements vscode.Disposable {
         this.treeProvider.clear();
         vscode.window.showInformationMessage('Scanning folder...');
 
-        const config = vscode.workspace.getConfiguration('get-unused-imports');
-        const extensions = config.get<string[]>('fileExtensions', DEFAULT_FILE_EXTENSIONS);
+        const extensions = this.getEnabledExtensions();
         
         const allFiles: vscode.Uri[] = [];
         for (const ext of extensions) {

@@ -39,9 +39,14 @@ func FindUsedNames(content string, items []NamedItem) map[string]bool {
 	lines := strings.Split(content, "\n")
 
 	for _, item := range items {
+		inBlockComment := false
 		found := false
 		for i, line := range lines {
 			if i+1 == item.Line {
+				continue
+			}
+			line = stripCommentsForUsage(line, &inBlockComment)
+			if strings.TrimSpace(line) == "" {
 				continue
 			}
 
@@ -76,19 +81,68 @@ func FindUsedNames(content string, items []NamedItem) map[string]bool {
 
 // containsWord checks if a word exists as a whole word in the content
 func containsWord(content, word string) bool {
+	inBlockComment := false
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = stripCommentsForUsage(line, &inBlockComment)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if containsWordInLine(line, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWordInLine(line, word string) bool {
 	idx := 0
 	for {
-		pos := strings.Index(content[idx:], word)
+		pos := strings.Index(line[idx:], word)
 		if pos == -1 {
 			break
 		}
 		pos += idx
-		if isWordBoundary(content, pos) && isWordEnd(content, pos+len(word)) {
+		if isWordBoundary(line, pos) && isWordEnd(line, pos+len(word)) {
 			return true
 		}
 		idx = pos + 1
 	}
 	return false
+}
+
+func stripCommentsForUsage(line string, inBlockComment *bool) string {
+	if *inBlockComment {
+		if end := strings.Index(line, "*/"); end >= 0 {
+			*inBlockComment = false
+			line = line[end+2:]
+		} else {
+			return ""
+		}
+	}
+
+	if start := strings.Index(line, "/*"); start >= 0 {
+		if end := strings.Index(line[start+2:], "*/"); end >= 0 {
+			line = line[:start] + line[start+2+end+2:]
+		} else {
+			*inBlockComment = true
+			line = line[:start]
+		}
+	}
+
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") {
+		return ""
+	}
+
+	if pos := strings.Index(line, "//"); pos >= 0 {
+		line = line[:pos]
+	}
+	if pos := strings.Index(line, "#"); pos >= 0 {
+		line = line[:pos]
+	}
+
+	return line
 }
 
 func findUsedParameterNames(content string, params []CodeIssue) map[string]bool {

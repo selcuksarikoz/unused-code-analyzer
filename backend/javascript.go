@@ -57,10 +57,11 @@ func analyzeJSTS(content, filename string) AnalysisResult {
 	}
 
 	used := FindUsedNames(content, named)
+	importUsed := findUsedJSImportNames(content, imports)
 
 	var unusedImports []CodeIssue
 	for _, imp := range imports {
-		if !used[imp.name] {
+		if !used[imp.name] && !importUsed[imp.name] {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.line,
@@ -169,10 +170,13 @@ func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, 
 }
 
 func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
+	localImports := findJSTSImports(file.Content)
+	localImportUsed := findUsedJSImportNames(file.Content, localImports)
+
 	var unusedImports []CodeIssue
 	for _, imp := range imports {
 		key := imp.Name + "@" + file.Filename
-		if !usedNames[key] {
+		if !usedNames[key] && !localImportUsed[imp.Name] {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.Line,
@@ -576,6 +580,33 @@ func isFrameworkSpecialExport(name, filename string) bool {
 	}
 
 	return false
+}
+
+func findUsedJSImportNames(content string, imports []jsImportItem) map[string]bool {
+	used := make(map[string]bool)
+	lines := strings.Split(content, "\n")
+
+	for _, imp := range imports {
+		if imp.name == "" {
+			continue
+		}
+
+		openTag := "<" + imp.name
+		closeTag := "</" + imp.name
+
+		for i, line := range lines {
+			if i+1 == imp.line {
+				continue
+			}
+
+			if strings.Contains(line, openTag) || strings.Contains(line, closeTag) || containsWord(line, imp.name) {
+				used[imp.name] = true
+				break
+			}
+		}
+	}
+
+	return used
 }
 
 func isValidJSIdent(name string) bool {
