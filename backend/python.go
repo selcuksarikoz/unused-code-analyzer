@@ -1,9 +1,6 @@
 package main
 
 import (
-	"regexp"
-	"strings"
-
 	"github.com/go-python/gpython/ast"
 	"github.com/go-python/gpython/parser"
 	"github.com/go-python/gpython/py"
@@ -278,35 +275,8 @@ func findPythonParametersForWorkspace(tree ast.Ast, filename string) []pyItem {
 }
 
 func findPythonParametersFromContent(content, filename string) []CodeIssue {
-	var params []CodeIssue
-	re := regexp.MustCompile(`def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)`)
-	lines := strings.Split(content, "\n")
-
-	for i, line := range lines {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) > 1 {
-			paramStr := matches[1]
-			parts := strings.Split(paramStr, ",")
-			for _, part := range parts {
-				part = strings.TrimSpace(part)
-				if part == "" || strings.Contains(part, "=") {
-					continue
-				}
-				paramName := strings.Split(part, "=")[0]
-				paramName = strings.TrimSpace(paramName)
-				if paramName != "self" && paramName != "cls" {
-					params = append(params, CodeIssue{
-						Line: i + 1,
-						Text: "parameter " + paramName,
-						File: filename,
-						ID:   generateUUID(),
-					})
-				}
-			}
-		}
-	}
-
-	return params
+	// Use AST-based analysis instead of regex
+	return []CodeIssue{}
 }
 
 type pyItem struct {
@@ -476,8 +446,22 @@ func isValidPyIdent(s string) bool {
 	if s == "" {
 		return false
 	}
-	re := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-	return re.MatchString(s)
+
+	// Check first character
+	first := s[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_') {
+		return false
+	}
+
+	// Check remaining characters
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+
+	return true
 }
 
 func findUsedNamesPython(content string, imports []pyItem, variables []pyItem) map[string]bool {

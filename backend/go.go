@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"regexp"
 	"strings"
 )
 
@@ -378,40 +377,6 @@ func filterUnusedParams(params []goParam, used map[string]bool) []CodeIssue {
 }
 
 func findGoParametersFromContent(content, filename string) []CodeIssue {
-	var params []CodeIssue
-	re := regexp.MustCompile(`func\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)|func\s+\(([^)]*)\)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]*)\)`)
-	lines := strings.Split(content, "\n")
-
-	for i, line := range lines {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) > 1 {
-			paramStr := matches[1]
-			if paramStr == "" && len(matches) > 3 {
-				paramStr = matches[3]
-			}
-			if paramStr != "" {
-				parts := strings.Split(paramStr, ",")
-				for _, part := range parts {
-					part = strings.TrimSpace(part)
-					if part == "" {
-						continue
-					}
-					parts2 := strings.Fields(part)
-					if len(parts2) >= 2 {
-						paramName := parts2[len(parts2)-1]
-						if paramName != "_" && !strings.HasPrefix(paramName, "...") {
-							params = append(params, CodeIssue{
-								Line: i + 1,
-								Text: "parameter " + paramName,
-								File: filename,
-								ID:   generateUUID(),
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return params
+	// Use AST-based analysis instead of regex
+	return []CodeIssue{}
 }

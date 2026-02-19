@@ -1,0 +1,24 @@
+# Ignore all by default
+*
+
+# Include necessary files and directories
+!out/**
+!assets/**
+!node_modules/typescript/**
+!LICENSE
+!README.md
+!package.json
+
+# Exclude .DS_Store files everywhere
+**/.DS_Store
+assets/.DS_Store
+
+# Exclude dev directories and files
+.git/**
+.gitignore
+backend/**
+scripts/**
+*.vsix
+.vscode/**
+tsconfig.json
+src/**

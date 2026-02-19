@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall/js"
@@ -55,10 +54,6 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 	switch lang {
 	case LangPython:
 		result = analyzePython(req.Content, req.Filename)
-	case LangJavaScript, LangTypeScript:
-		fmt.Printf("[Analyzer] JS/TS analysis for: %s\n", req.Filename)
-		result = analyzeJavaScript(req.Content, req.Filename)
-		fmt.Printf("[Analyzer] Result: %+v\n", result)
 	case LangGo:
 		result = analyzeGo(req.Content, req.Filename)
 	default:
@@ -84,11 +79,6 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		fmt.Printf("[Analyzer] Workspace file: %s, lang: %s\n", file.Filename, lang)
 
 		switch lang {
-		case LangJavaScript, LangTypeScript:
-			defs, imports, _, _ := analyzeJavaScriptForWorkspace(file.Content, file.Filename)
-			fmt.Printf("[Analyzer] JS defs: %d, imports: %d\n", len(defs), len(imports))
-			a.allDefinitions[file.Filename] = defs
-			a.allImports[file.Filename] = imports
 		case LangPython:
 			defs, imports, _, _ := analyzePythonForWorkspace(file.Content, file.Filename)
 			a.allDefinitions[file.Filename] = defs
@@ -144,9 +134,6 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		lang := DetectLanguage(file.Filename)
 
 		switch lang {
-		case LangJavaScript, LangTypeScript:
-			results[file.Filename] = buildResultJS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
-			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
 			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
@@ -171,9 +158,8 @@ func getFileContent(files []AnalyzeFile, filename string) string {
 }
 
 func isNameUsedInOtherFiles(files []AnalyzeFile, excludeFilename, name string) bool {
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 	for _, f := range files {
-		if f.Filename != excludeFilename && re.MatchString(f.Content) {
+		if f.Filename != excludeFilename && containsWord(f.Content, name) {
 			return true
 		}
 	}
@@ -196,58 +182,6 @@ func isExportedUsedInOtherFiles(files []AnalyzeFile, excludeFilename, name strin
 }
 
 var a *MultiLangAnalyzer
-
-func buildResultJS(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
-	parameters := findJSParameters(file.Content, file.Filename)
-
-	var unusedImports, unusedVars, unusedParams []CodeIssue
-
-	for _, imp := range imports {
-		key := imp.Name + "@" + file.Filename
-		if !usedNames[key] {
-			unusedImports = append(unusedImports, CodeIssue{
-				ID:   generateUUID(),
-				Line: imp.Line,
-				Text: "import " + imp.Name,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, v := range defs {
-		if v.Exported {
-			continue
-		}
-		key := v.Name + "@" + file.Filename
-		if !usedNames[key] {
-			unusedVars = append(unusedVars, CodeIssue{
-				ID:   generateUUID(),
-				Line: v.Line,
-				Text: v.Type + " " + v.Name,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, p := range parameters {
-		paramName := strings.TrimPrefix(p.Text, "parameter ")
-		key := paramName + "@" + file.Filename
-		if !usedNames[key] {
-			unusedParams = append(unusedParams, CodeIssue{
-				ID:   generateUUID(),
-				Line: p.Line,
-				Text: p.Text,
-				File: file.Filename,
-			})
-		}
-	}
-
-	return AnalysisResult{
-		Imports:    unusedImports,
-		Variables:  unusedVars,
-		Parameters: unusedParams,
-	}
-}
 
 func buildResultPython(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
 	parameters := findPythonParametersFromContent(file.Content, file.Filename)

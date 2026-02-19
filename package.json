@@ -16,12 +16,6 @@
     "Other"
   ],
   "main": "./out/extension.js",
-  "files": [
-    "out/**/*",
-    "assets/**/*",
-    "LICENSE",
-    "README.md"
-  ],
   "contributes": {
     "configuration": {
       "title": "Get Unused Imports",
@@ -164,13 +158,13 @@
     "package": "vsce package",
     "publish": "vsce publish"
   },
+  "dependencies": {
+    "typescript": "^6.0.0-dev.20260219"
+  },
   "devDependencies": {
     "@types/node": "^22.19.11",
     "@types/vscode": "^1.109.0",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.7.1",
-    "typescript": "^5.9.3"
-  },
-  "dependencies": {
+    "@vscode/vsce": "^3.7.1"
   }
 }
