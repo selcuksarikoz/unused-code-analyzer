@@ -433,58 +433,57 @@ class Extension implements vscode.Disposable {
         this.isScanning = true;
         this.treeProvider.clear();
         this.fileHashes.clear();
-        vscode.window.showInformationMessage('Scanning workspace for unused code...');
+
+        let scannedCount = 0;
+        let totalResults = 0;
 
         const files = await this.getAllFiles();
+        scannedCount = files.length;
 
-        if (!files || files.length === 0) {
-            vscode.window.showInformationMessage('No files found to scan');
-            this.isScanning = false;
-            return;
-        }
-
-        const workspaceFiles: { content: string; filename: string }[] = [];
-        
-        for (const file of files) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(file.fsPath);
-                const content = doc.getText();
-                const hash = computeHash(content);
-                this.fileHashes.set(file.fsPath, hash);
-                workspaceFiles.push({
-                    content,
-                    filename: file.fsPath
-                });
-            } catch (error) {
-                console.error(`Error reading ${file.fsPath}:`, error);
-            }
-        }
-
-        const resultsMap = await this.wasmService.analyzeWorkspace(workspaceFiles);
-        
-        const allResults: AnalysisResult = { imports: [], variables: [], parameters: [] };
-        const fileResults: FileIssue[] = [];
-        
-        for (const [filename, result] of resultsMap) {
-            const totalIssues = result.imports.length + result.variables.length + result.parameters.length;
+        if (files && files.length > 0) {
+            const workspaceFiles: { content: string; filename: string }[] = [];
             
-            if (totalIssues > 0) {
-                fileResults.push({
-                    file: vscode.workspace.asRelativePath(filename),
-                    issues: result
-                });
-                
-                allResults.imports.push(...result.imports);
-                allResults.variables.push(...result.variables);
-                allResults.parameters.push(...result.parameters);
+            for (const file of files) {
+                try {
+                    const doc = await vscode.workspace.openTextDocument(file.fsPath);
+                    const content = doc.getText();
+                    const hash = computeHash(content);
+                    this.fileHashes.set(file.fsPath, hash);
+                    workspaceFiles.push({
+                        content,
+                        filename: file.fsPath
+                    });
+                } catch (error) {
+                    console.error(`Error reading ${file.fsPath}:`, error);
+                }
             }
+
+            const resultsMap = await this.wasmService.analyzeWorkspace(workspaceFiles);
+            
+            const allResults: AnalysisResult = { imports: [], variables: [], parameters: [] };
+            const fileResults: FileIssue[] = [];
+            
+            for (const [filename, result] of resultsMap) {
+                const issuesCount = result.imports.length + result.variables.length + result.parameters.length;
+                
+                if (issuesCount > 0) {
+                    fileResults.push({
+                        file: vscode.workspace.asRelativePath(filename),
+                        issues: result
+                    });
+                    
+                    allResults.imports.push(...result.imports);
+                    allResults.variables.push(...result.variables);
+                    allResults.parameters.push(...result.parameters);
+                }
+            }
+
+            this.treeProvider.addResults(fileResults);
         }
-
-        this.treeProvider.addResults(fileResults);
-
+        
         this.isScanning = false;
-        const totalResults = this.treeProvider.getResults().length || 0;
-        vscode.window.showInformationMessage(`Scan complete! Found ${totalResults} files with issues.`);
+        totalResults = this.treeProvider.getResults().length || 0;
+        vscode.window.showInformationMessage(`Scan complete. Scanned ${scannedCount} files, found ${totalResults} files with issues.`);
     }
 
     private async scanFile(uri?: vscode.Uri): Promise<void> {
@@ -549,7 +548,9 @@ class Extension implements vscode.Disposable {
         
         this.isScanning = true;
         this.treeProvider.clear();
-        vscode.window.showInformationMessage('Scanning folder...');
+
+        let scannedCount = 0;
+        let totalResults = 0;
 
         const extensions = this.getEnabledExtensions();
         
@@ -559,50 +560,47 @@ class Extension implements vscode.Disposable {
             const files = await vscode.workspace.findFiles(pattern, this.getExcludePattern());
             allFiles.push(...files);
         }
+        scannedCount = allFiles.length;
 
-        if (allFiles.length === 0) {
-            vscode.window.showInformationMessage('No files found to scan');
-            this.isScanning = false;
-            return;
-        }
-
-        const workspaceFiles: { content: string; filename: string }[] = [];
-        
-        for (const file of allFiles) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(file.fsPath);
-                const content = doc.getText();
-                const hash = computeHash(content);
-                this.fileHashes.set(file.fsPath, hash);
-                workspaceFiles.push({
-                    content,
-                    filename: file.fsPath
-                });
-            } catch (error) {
-                console.error(`Error reading ${file.fsPath}:`, error);
-            }
-        }
-
-        const resultsMap = await this.wasmService.analyzeWorkspace(workspaceFiles);
-        
-        const fileResults: FileIssue[] = [];
-        
-        for (const [filename, result] of resultsMap) {
-            const totalIssues = result.imports.length + result.variables.length + result.parameters.length;
+        if (allFiles.length > 0) {
+            const workspaceFiles: { content: string; filename: string }[] = [];
             
-            if (totalIssues > 0) {
-                fileResults.push({
-                    file: vscode.workspace.asRelativePath(filename),
-                    issues: result
-                });
+            for (const file of allFiles) {
+                try {
+                    const doc = await vscode.workspace.openTextDocument(file.fsPath);
+                    const content = doc.getText();
+                    const hash = computeHash(content);
+                    this.fileHashes.set(file.fsPath, hash);
+                    workspaceFiles.push({
+                        content,
+                        filename: file.fsPath
+                    });
+                } catch (error) {
+                    console.error(`Error reading ${file.fsPath}:`, error);
+                }
             }
+
+            const resultsMap = await this.wasmService.analyzeWorkspace(workspaceFiles);
+            
+            const fileResults: FileIssue[] = [];
+            
+            for (const [filename, result] of resultsMap) {
+                const issuesCount = result.imports.length + result.variables.length + result.parameters.length;
+                
+                if (issuesCount > 0) {
+                    fileResults.push({
+                        file: vscode.workspace.asRelativePath(filename),
+                        issues: result
+                    });
+                }
+            }
+
+            this.treeProvider.addResults(fileResults);
         }
-
-        this.treeProvider.addResults(fileResults);
-
+        
         this.isScanning = false;
-        const totalResults = this.treeProvider.getResults().length || 0;
-        vscode.window.showInformationMessage(`Scan complete! Found ${totalResults} files with issues.`);
+        totalResults = this.treeProvider.getResults().length || 0;
+        vscode.window.showInformationMessage(`Scan complete. Scanned ${scannedCount} files, found ${totalResults} files with issues.`);
     }
 
     dispose(): void {

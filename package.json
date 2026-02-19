@@ -91,7 +91,11 @@
       },
       {
         "command": "get-unused-imports.scanFile",
-        "title": "Get Unused: Scan File"
+        "title": "Get Unused: Scan File",
+        "icon": {
+          "light": "assets/icons/toolbar-icon.svg",
+          "dark": "assets/icons/toolbar-icon.svg"
+        }
       },
       {
         "command": "get-unused-imports.scanFolder",
@@ -101,7 +105,7 @@
     "menus": {
       "editor/title": [
         {
-          "command": "get-unused-imports.scanWorkspace",
+          "command": "get-unused-imports.scanFile",
           "when": "editorTextFocus",
           "group": "navigation@1"
         }
