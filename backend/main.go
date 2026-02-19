@@ -73,15 +73,6 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	a.allImports = make(map[string][]Import)
 
 	for _, file := range req.Files {
-		hash := file.Hash
-		if hash == "" {
-			hash = "default"
-		}
-
-		if entry, ok := a.cache[file.Filename]; ok && entry.hash == hash {
-			continue
-		}
-
 		lang := DetectLanguage(file.Filename)
 
 		switch lang {
@@ -105,19 +96,24 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	for filename, defs := range a.allDefinitions {
 		content := getFileContent(req.Files, filename)
 
+		var defItems []NamedItem
 		for _, def := range defs {
-			re := regexp.MustCompile(`\b` + regexp.QuoteMeta(def.Name) + `\b`)
-			if re.MatchString(content) {
-				usedNames[def.Name+"@"+filename] = true
-			}
+			defItems = append(defItems, NamedItem{Name: def.Name, Line: def.Line})
+		}
+		defUsed := FindUsedNames(content, defItems)
+		for name := range defUsed {
+			usedNames[name+"@"+filename] = true
 		}
 
+		var impItems []NamedItem
 		for _, imp := range a.allImports[filename] {
-			re := regexp.MustCompile(`\b` + regexp.QuoteMeta(imp.Name) + `\b`)
-			isUsedInOtherFile := isNameUsedInOtherFiles(req.Files, filename, imp.Name)
-
-			if re.MatchString(content) || isUsedInOtherFile {
-				usedNames[imp.Name+"@"+filename] = true
+			impItems = append(impItems, NamedItem{Name: imp.Name, Line: imp.Line})
+		}
+		impUsed := FindUsedNames(content, impItems)
+		for name := range impUsed {
+			isUsedInOtherFile := isNameUsedInOtherFiles(req.Files, filename, name)
+			if isUsedInOtherFile {
+				usedNames[name+"@"+filename] = true
 			}
 		}
 	}
@@ -141,10 +137,13 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		switch lang {
 		case LangJavaScript, LangTypeScript:
 			results[file.Filename] = buildResultJS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
 			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangGo:
 			results[file.Filename] = buildResultGo(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		default:
 			results[file.Filename] = AnalysisResult{}
 		}

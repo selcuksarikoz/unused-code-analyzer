@@ -18,6 +18,16 @@ import (
 	- Unused variables/functions (check if used in any other file)
 	- Unused parameters
 
+	IMPORTANT: When adding/modifying analysis logic in any language file
+	(javascript.go, python.go, go.go), you MUST apply the SAME changes to:
+	- The single-file analysis function (e.g., findUsedNamesJS, findUsedNamesPython, findUsedGoNames)
+	- The workspace analysis function in main.go (AnalyzeWorkspace)
+	- All language-specific files to ensure consistent behavior
+
+	Common bugs to avoid:
+	- Checking usage INCLUDES the definition line itself (should skip the line where the name is defined)
+	- This causes false negatives (unused items not detected)
+
 	Scan File: Single file analysis
 	Scan Folder: All files in folder, cross-file analysis
 	Scan Workspace: All files in workspace, cross-file analysis

@@ -481,21 +481,12 @@ func isValidPyIdent(s string) bool {
 }
 
 func findUsedNamesPython(content string, imports []pyItem, variables []pyItem) map[string]bool {
-	used := make(map[string]bool)
-
+	var items []NamedItem
 	for _, item := range imports {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(item.name) + `\b`)
-		if re.MatchString(content) {
-			used[item.name] = true
-		}
+		items = append(items, NamedItem{Name: item.name, Line: item.line})
 	}
-
 	for _, item := range variables {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(item.name) + `\b`)
-		if re.MatchString(content) {
-			used[item.name] = true
-		}
+		items = append(items, NamedItem{Name: item.name, Line: item.line})
 	}
-
-	return used
+	return FindUsedNames(content, items)
 }

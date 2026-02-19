@@ -371,22 +371,9 @@ func extractJSParams(params string) []string {
 }
 
 func findUsedNamesJS(content string, defs []Definition) map[string]bool {
-	used := make(map[string]bool)
-
+	var items []NamedItem
 	for _, def := range defs {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(def.Name) + `\b`)
-		if re.MatchString(content) {
-			used[def.Name] = true
-		}
+		items = append(items, NamedItem{Name: def.Name, Line: def.Line})
 	}
-
-	reParam := regexp.MustCompile(`parameter\s+([a-zA-Z_$][a-zA-Z0-9_$]*)`)
-	matches := reParam.FindAllStringSubmatch(content, -1)
-	for _, m := range matches {
-		if len(m) > 1 {
-			used[m[1]] = true
-		}
-	}
-
-	return used
+	return FindUsedNames(content, items)
 }

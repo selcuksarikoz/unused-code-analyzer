@@ -307,21 +307,17 @@ func findGoParametersAST(f *ast.File, fset *token.FileSet) []goParam {
 func findUsedGoNames(content string, imports []goImport, variables []goVar) map[string]bool {
 	used := make(map[string]bool)
 
+	var items []NamedItem
 	for _, imp := range imports {
 		if !imp.isBlank {
-			re := regexp.MustCompile(`\b` + regexp.QuoteMeta(imp.name) + `\b`)
-			if re.MatchString(content) {
-				used[imp.name] = true
-			}
+			items = append(items, NamedItem{Name: imp.name, Line: imp.line})
 		}
+	}
+	for _, v := range variables {
+		items = append(items, NamedItem{Name: v.name, Line: v.line})
 	}
 
-	for _, v := range variables {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(v.name) + `\b`)
-		if re.MatchString(content) {
-			used[v.name] = true
-		}
-	}
+	used = FindUsedNames(content, items)
 
 	return used
 }
