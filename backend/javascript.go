@@ -1,9 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 var (
 	reJSImport     = regexp.MustCompile(`^\s*import\s+(?:(?:\{[^}]*\}|\*\s+as\s+[^}]+|[a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[^}]+|[a-zA-Z_$][a-zA-Z0-9_$]*))*\s+from\s+)?['"]([^'"]+)['"]`)
@@ -16,11 +24,20 @@ var (
 )
 
 func analyzeJavaScript(content, filename string) AnalysisResult {
+	fmt.Printf("[JS] Analyzing: %s\n", filename)
 	defs := findJSDefinitions(content, filename)
 	imports := findJSImports(content, filename)
 	parameters := findJSParameters(content, filename)
 
+	fmt.Printf("[JS] Found defs: %d, imports: %d, params: %d\n", len(defs), len(imports), len(parameters))
+
+	if len(imports) == 0 && len(defs) > 0 {
+		fmt.Printf("[JS] WARNING: No imports found in %s! First 500 chars:\n%s\n", filename, content[:min(500, len(content))])
+	}
+
 	used := findUsedNamesJS(content, defs)
+
+	fmt.Printf("[JS] Used names: %v\n", used)
 
 	var unusedImports, unusedVars, unusedParams []CodeIssue
 
@@ -60,6 +77,8 @@ func analyzeJavaScript(content, filename string) AnalysisResult {
 			})
 		}
 	}
+
+	fmt.Printf("[JS] Result - unused imports: %d, vars: %d, params: %d\n", len(unusedImports), len(unusedVars), len(unusedParams))
 
 	return AnalysisResult{
 		Imports:    unusedImports,
@@ -107,22 +126,42 @@ func analyzeJavaScriptForWorkspace(content, filename string) ([]Definition, []Im
 }
 
 func findJSImports(content string, filename string) []Import {
+	fmt.Printf("[JS Imports] Starting for: %s\n", filename)
 	var imports []Import
 	seen := make(map[string]bool)
 	lines := strings.Split(content, "\n")
 
+	fmt.Printf("[JS Imports] Total lines: %d\n", len(lines))
+
+	// Print first 10 lines for debugging
+	for i := 0; i < min(10, len(lines)); i++ {
+		fmt.Printf("[JS Imports] Line %d: %s\n", i+1, lines[i])
+	}
+
+	testLine := `import { useState } from "react";`
+	matches := reJSImport.FindStringSubmatch(testLine)
+	fmt.Printf("[JS Imports] Test regex on '%s': matches=%d\n", testLine, len(matches))
+
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		lineNum := i + 1
+
+		if strings.HasPrefix(line, "import ") {
+			fmt.Printf("[JS Imports] Import line %d: %s\n", lineNum, line)
+			matches := reJSImport.FindStringSubmatch(line)
+			fmt.Printf("[JS Imports] Regex matches: %d\n", len(matches))
+		}
 
 		if strings.HasPrefix(line, "//") {
 			continue
 		}
 
 		if matches := reJSImport.FindStringSubmatch(line); len(matches) > 2 {
+			fmt.Printf("[JS Imports] Matched import at line %d: %s\n", lineNum, line)
 			modulePath := matches[2]
 			importPart := matches[1]
 			names := extractJSImportNames(importPart)
+			fmt.Printf("[JS Imports] Found names: %v from import part: %s\n", names, importPart)
 
 			for _, name := range names {
 				key := name + "|" + modulePath
@@ -146,6 +185,7 @@ func findJSImports(content string, filename string) []Import {
 			})
 		}
 	}
+	fmt.Printf("[JS Imports] Final count: %d\n", len(imports))
 	return imports
 }
 

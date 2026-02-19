@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -48,16 +49,20 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 	}
 
 	lang := DetectLanguage(req.Filename)
+	fmt.Printf("[Analyzer] Analyzing file: %s, language: %s\n", req.Filename, lang)
 
 	var result AnalysisResult
 	switch lang {
 	case LangPython:
 		result = analyzePython(req.Content, req.Filename)
 	case LangJavaScript, LangTypeScript:
+		fmt.Printf("[Analyzer] JS/TS analysis for: %s\n", req.Filename)
 		result = analyzeJavaScript(req.Content, req.Filename)
+		fmt.Printf("[Analyzer] Result: %+v\n", result)
 	case LangGo:
 		result = analyzeGo(req.Content, req.Filename)
 	default:
+		fmt.Printf("[Analyzer] Unknown language for: %s\n", req.Filename)
 		result = AnalysisResult{}
 	}
 
@@ -69,15 +74,19 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	fmt.Printf("[Analyzer] AnalyzeWorkspace called with %d files\n", len(req.Files))
+
 	a.allDefinitions = make(map[string][]Definition)
 	a.allImports = make(map[string][]Import)
 
 	for _, file := range req.Files {
 		lang := DetectLanguage(file.Filename)
+		fmt.Printf("[Analyzer] Workspace file: %s, lang: %s\n", file.Filename, lang)
 
 		switch lang {
 		case LangJavaScript, LangTypeScript:
 			defs, imports, _, _ := analyzeJavaScriptForWorkspace(file.Content, file.Filename)
+			fmt.Printf("[Analyzer] JS defs: %d, imports: %d\n", len(defs), len(imports))
 			a.allDefinitions[file.Filename] = defs
 			a.allImports[file.Filename] = imports
 		case LangPython:
