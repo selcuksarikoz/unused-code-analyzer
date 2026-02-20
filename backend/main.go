@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"hash/fnv"
 	"sort"
 	"strconv"
@@ -66,7 +65,6 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 	}
 
 	lang := DetectLanguage(req.Filename)
-	fmt.Printf("[Analyzer] Analyzing file: %s, language: %s\n", req.Filename, lang)
 
 	var result AnalysisResult
 	switch lang {
@@ -81,7 +79,6 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 	case LangPHP:
 		result = analyzePHP(req.Content, req.Filename)
 	default:
-		fmt.Printf("[Analyzer] Unknown language for: %s\n", req.Filename)
 		result = AnalysisResult{}
 	}
 
@@ -93,19 +90,11 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	fmt.Printf("[Analyzer] AnalyzeWorkspace called with %d files\n", len(req.Files))
-	sig := workspaceSignature(req.Files)
-	if sig == a.workspaceSig && len(a.workspaceRes) > 0 {
-		fmt.Printf("[Analyzer] Workspace cache hit for signature %s\n", sig)
-		return WorkspaceAnalysisResult{Results: cloneAnalysisResults(a.workspaceRes)}
-	}
-
 	a.allDefinitions = make(map[string][]Definition)
 	a.allImports = make(map[string][]Import)
 
 	for _, file := range req.Files {
 		lang := DetectLanguage(file.Filename)
-		fmt.Printf("[Analyzer] Workspace file: %s, lang: %s\n", file.Filename, lang)
 
 		defs, imports := a.getParsedWorkspaceData(file, lang)
 		a.allDefinitions[file.Filename] = defs
@@ -114,36 +103,56 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 	usedNames := make(map[string]bool)
 
-	for filename, defs := range a.allDefinitions {
-		content := getFileContent(req.Files, filename)
-
-		var defItems []NamedItem
-		for _, def := range defs {
-			defItems = append(defItems, NamedItem{Name: def.Name, Line: def.Line})
-		}
-		defUsed := FindUsedNames(content, defItems)
-		for name := range defUsed {
-			usedNames[name+"@"+filename] = true
-		}
-
-		var impItems []NamedItem
-		for _, imp := range a.allImports[filename] {
-			impItems = append(impItems, NamedItem{Name: imp.Name, Line: imp.Line})
-		}
-		impUsed := FindUsedNames(content, impItems)
-		for name := range impUsed {
-			// Import usage is primarily local; mark directly when used in-file.
-			usedNames[name+"@"+filename] = true
-		}
-	}
-
 	for _, file := range req.Files {
 		for _, def := range a.allDefinitions[file.Filename] {
-			if def.Exported {
-				isUsed := a.isExportedUsedInOtherFiles(req.Files, file.Filename, def.Name)
-				if isUsed {
-					usedNames[def.Name+"@"+file.Filename] = true
+			if def.Name == "" {
+				continue
+			}
+
+			isUsed := false
+
+			for _, otherFile := range req.Files {
+				if otherFile.Filename == file.Filename {
+					continue
 				}
+
+				otherContent := removeImportLines(otherFile.Content)
+				if strings.Contains(otherContent, def.Name) {
+					isUsed = true
+					break
+				}
+			}
+
+			if isUsed {
+				usedNames[def.Name+"@"+file.Filename] = true
+			} else {
+				usedNames[def.Name+"@"+file.Filename] = false
+			}
+		}
+
+		for _, imp := range a.allImports[file.Filename] {
+			if imp.Name == "" {
+				continue
+			}
+
+			isUsed := false
+
+			for _, otherFile := range req.Files {
+				if otherFile.Filename == file.Filename {
+					continue
+				}
+
+				otherContent := removeImportLines(otherFile.Content)
+				if strings.Contains(otherContent, imp.Name) {
+					isUsed = true
+					break
+				}
+			}
+
+			if isUsed {
+				usedNames[imp.Name+"@"+file.Filename] = true
+			} else {
+				usedNames[imp.Name+"@"+file.Filename] = false
 			}
 		}
 	}
@@ -155,29 +164,25 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 		switch lang {
 		case LangJavaScript, LangTypeScript:
-			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
-			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangGo:
-			results[file.Filename] = buildResultGo(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames)
+			results[file.Filename] = buildResultGo(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangRuby:
-			// Ruby workspace output: prefer language-local analyzer result for better regex/heuristic fidelity.
-			results[file.Filename] = analyzeRuby(file.Content, file.Filename)
+			results[file.Filename] = buildResultRuby(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPHP:
-			// PHP workspace output: prefer language-local analyzer result for better regex/heuristic fidelity.
-			results[file.Filename] = analyzePHP(file.Content, file.Filename)
+			results[file.Filename] = buildResultPHP(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		default:
 			results[file.Filename] = AnalysisResult{}
 		}
 	}
 
-	a.workspaceSig = sig
-	a.workspaceRes = cloneAnalysisResults(results)
 	return WorkspaceAnalysisResult{Results: results}
 }
 
@@ -270,106 +275,6 @@ func (a *MultiLangAnalyzer) isExportedUsedInOtherFiles(files []AnalyzeFile, excl
 	return false
 }
 
-var a *MultiLangAnalyzer
-
-func buildResultPython(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
-	parameters := findPythonParametersFromContent(file.Content, file.Filename)
-	localImportUsed := findUsedPythonImportNames(file.Content, imports)
-
-	var unusedImports, unusedVars, unusedParams []CodeIssue
-
-	for _, imp := range imports {
-		if !localImportUsed[imp.Name] {
-			unusedImports = append(unusedImports, CodeIssue{
-				ID:   generateUUID(),
-				Line: imp.Line,
-				Text: "import " + imp.Name,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, v := range defs {
-		key := v.Name + "@" + file.Filename
-		if !usedNames[key] {
-			unusedVars = append(unusedVars, CodeIssue{
-				ID:   generateUUID(),
-				Line: v.Line,
-				Text: v.Type + " " + v.Name,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, p := range parameters {
-		paramName := strings.TrimPrefix(p.Text, "parameter ")
-		key := paramName + "@" + file.Filename
-		if !usedNames[key] {
-			unusedParams = append(unusedParams, CodeIssue{
-				ID:   generateUUID(),
-				Line: p.Line,
-				Text: p.Text,
-				File: file.Filename,
-			})
-		}
-	}
-
-	return AnalysisResult{
-		Imports:    unusedImports,
-		Variables:  unusedVars,
-		Parameters: unusedParams,
-	}
-}
-
-func buildResultGo(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool) AnalysisResult {
-	parameters := findGoParametersFromContent(file.Content, file.Filename)
-	localImportUsed := findUsedGoImportNames(file.Content, file.Filename)
-
-	var unusedImports, unusedVars, unusedParams []CodeIssue
-
-	for _, imp := range imports {
-		if !localImportUsed[imp.Name] {
-			unusedImports = append(unusedImports, CodeIssue{
-				ID:   generateUUID(),
-				Line: imp.Line,
-				Text: "import " + imp.Source,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, v := range defs {
-		key := v.Name + "@" + file.Filename
-		if !usedNames[key] {
-			unusedVars = append(unusedVars, CodeIssue{
-				ID:   generateUUID(),
-				Line: v.Line,
-				Text: v.Type + " " + v.Name,
-				File: file.Filename,
-			})
-		}
-	}
-
-	for _, p := range parameters {
-		paramName := strings.TrimPrefix(p.Text, "parameter ")
-		key := paramName + "@" + file.Filename
-		if !usedNames[key] {
-			unusedParams = append(unusedParams, CodeIssue{
-				ID:   generateUUID(),
-				Line: p.Line,
-				Text: p.Text,
-				File: file.Filename,
-			})
-		}
-	}
-
-	return AnalysisResult{
-		Imports:    unusedImports,
-		Variables:  unusedVars,
-		Parameters: unusedParams,
-	}
-}
-
 var globalAnalyzer *MultiLangAnalyzer
 
 func analyzeCodeWrapper(this js.Value, args []js.Value) interface{} {
@@ -417,6 +322,24 @@ func detectLanguageWrapper(this js.Value, args []js.Value) interface{} {
 	lang := DetectLanguage(filename)
 
 	return js.ValueOf(string(lang))
+}
+
+func removeImportLines(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "import ") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "export ") && strings.Contains(trimmed, "from") {
+			continue
+		}
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
 }
 
 func main() {
