@@ -72,14 +72,23 @@ func (t *PHPTokenizer) next() rune {
 func (t *PHPTokenizer) Tokenize() []PHPToken {
 	inString := false
 	var stringChar rune
+	var stringStart int
+	var stringLine int
 
 	for t.pos < len(t.content) {
 		ch := t.peek()
+
+		if ch == '<' && t.pos+1 < len(t.content) && t.content[t.pos:t.pos+2] == "<?" {
+			t.next()
+			t.next()
+			continue
+		}
 
 		if inString {
 			if ch == stringChar && t.pos > 0 && t.content[t.pos-1] != '\\' {
 				t.next()
 				inString = false
+				t.tokens = append(t.tokens, PHPToken{Type: PHPTokenString, Value: t.content[stringStart:t.pos], Line: stringLine})
 			} else {
 				t.next()
 			}
@@ -134,6 +143,8 @@ func (t *PHPTokenizer) Tokenize() []PHPToken {
 		if ch == '"' || ch == '\'' {
 			inString = true
 			stringChar = ch
+			stringStart = t.pos
+			stringLine = t.line
 			t.next()
 			continue
 		}
@@ -211,42 +222,170 @@ func FindPHPImports(content string) []PHPImportItem {
 	t := NewPHPTokenizer(content)
 	tokens := t.Tokenize()
 
+	imports := findPHPImportsFromTokens(tokens)
+	return imports
+}
+
+func findPHPImportsFromTokens(tokens []PHPToken) []PHPImportItem {
 	var imports []PHPImportItem
 
 	var i int
 	for i < len(tokens) {
-		if tokens[i].Type == PHPTokenUse && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+		if tokens[i].Type == PHPTokenUse {
 			line := tokens[i].Line
-			var fullPath strings.Builder
-			fullPath.WriteString(tokens[i+1].Value)
-			i += 2
+			useType := "class"
+			useIdx := i + 1
 
-			for i < len(tokens) && tokens[i].Type == PHPTokenSemi == false {
-				if tokens[i].Type == PHPTokenIdentifier {
-					fullPath.WriteString("\\" + tokens[i].Value)
-				}
+			if useIdx < len(tokens) && (tokens[useIdx].Type == PHPTokenFunction || tokens[useIdx].Value == "function") {
+				useType = "function"
+				useIdx++
+			} else if useIdx < len(tokens) && tokens[useIdx].Value == "const" {
+				useType = "const"
+				useIdx++
+			}
+
+			if useIdx >= len(tokens) || tokens[useIdx].Type != PHPTokenIdentifier {
 				i++
+				continue
 			}
 
-			path := fullPath.String()
-			name := path
-			if strings.Contains(path, "\\") {
-				parts := strings.Split(path, "\\")
-				name = parts[len(parts)-1]
+			var fullPath []string
+			fullPath = append(fullPath, tokens[useIdx].Value)
+			useIdx++
+
+			for useIdx < len(tokens) && tokens[useIdx].Type != PHPTokenSemi {
+				if tokens[useIdx].Type == PHPTokenIdentifier {
+					fullPath = append(fullPath, tokens[useIdx].Value)
+				}
+				useIdx++
 			}
+
+			path := strings.Join(fullPath, "\\")
+			name := fullPath[len(fullPath)-1]
+
+			useText := "use "
+			if useType == "function" {
+				useText = "use function "
+			} else if useType == "const" {
+				useText = "use const "
+			}
+			useText += path + ";"
 
 			imports = append(imports, PHPImportItem{
 				name:     name,
 				fullPath: path,
 				line:     line,
-				text:     "use " + path + ";",
+				text:     useText,
 			})
+			i = useIdx
+			continue
 		}
 
 		i++
 	}
 
 	return imports
+}
+
+type PHPDefinition struct {
+	name      string
+	defType   string
+	line      int
+	modifiers []string
+}
+
+func FindPHPDefinitions(content string) []PHPDefinition {
+	t := NewPHPTokenizer(content)
+	tokens := t.Tokenize()
+
+	var defs []PHPDefinition
+
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == PHPTokenFunction && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+			defs = append(defs, PHPDefinition{
+				name:    tokens[i+1].Value,
+				defType: "function",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Type == PHPTokenClass && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+			defs = append(defs, PHPDefinition{
+				name:    tokens[i+1].Value,
+				defType: "class",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Type == PHPTokenInterface && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+			defs = append(defs, PHPDefinition{
+				name:    tokens[i+1].Value,
+				defType: "interface",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Type == PHPTokenTrait && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+			defs = append(defs, PHPDefinition{
+				name:    tokens[i+1].Value,
+				defType: "trait",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Value == "const" && i+1 < len(tokens) && tokens[i+1].Type == PHPTokenIdentifier {
+			defs = append(defs, PHPDefinition{
+				name:    tokens[i+1].Value,
+				defType: "const",
+				line:    tokens[i].Line,
+			})
+		}
+	}
+
+	return defs
+}
+
+func FindPHPParameters(content, filename string) []CodeIssue {
+	t := NewPHPTokenizer(content)
+	tokens := t.Tokenize()
+
+	var params []CodeIssue
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == PHPTokenFunction && i+1 < len(tokens) {
+			parenCount := 0
+			paramStart := -1
+			for j := i + 2; j < len(tokens); j++ {
+				if tokens[j].Type == PHPTokenLParen {
+					if parenCount == 0 {
+						paramStart = j + 1
+					}
+					parenCount++
+				}
+				if tokens[j].Type == PHPTokenRParen {
+					parenCount--
+					if parenCount == 0 {
+						break
+					}
+				}
+			}
+
+			if paramStart > 0 && paramStart < len(tokens) {
+				for j := paramStart; j < len(tokens) && tokens[j].Type != PHPTokenRParen; j++ {
+					if tokens[j].Type == PHPTokenIdentifier && j+1 < len(tokens) && tokens[j+1].Type != PHPTokenIdentifier {
+						paramName := tokens[j].Value
+						if paramName != "" && paramName != "string" && paramName != "int" && paramName != "bool" &&
+							paramName != "float" && paramName != "array" && paramName != "void" && paramName != "mixed" &&
+							paramName != "null" && paramName != "true" && paramName != "false" {
+							params = append(params, CodeIssue{
+								ID:   generateUUID(),
+								Line: tokens[j].Line,
+								Text: paramName + " (parameter)",
+								File: filename,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return params
 }
 
 func FindUsedPHPNames(content string) map[string]int {
@@ -289,10 +428,12 @@ func analyzePHP(content, filename string) AnalysisResult {
 
 func analyzePHPForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue) {
 	imports := FindPHPImports(content)
+	defs := FindPHPDefinitions(content)
 	counts := FindUsedPHPNames(content)
 
 	var outImports []Import
 	var unusedImports []CodeIssue
+	var outDefs []Definition
 
 	for _, imp := range imports {
 		outImports = append(outImports, Import{
@@ -311,15 +452,29 @@ func analyzePHPForWorkspace(content, filename string) ([]Definition, []Import, [
 		}
 	}
 
-	return []Definition{}, outImports, unusedImports, []CodeIssue{}
+	for _, d := range defs {
+		outDefs = append(outDefs, Definition{
+			Name: d.name,
+			Type: d.defType,
+			Line: d.line,
+			File: filename,
+		})
+	}
+
+	return outDefs, outImports, unusedImports, []CodeIssue{}
 }
 
 func buildResultPHP(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
 	localImports := FindPHPImports(file.Content)
+	localDefs := FindPHPDefinitions(file.Content)
+	parameters := FindPHPParameters(file.Content, file.Filename)
+	counts := FindUsedPHPNames(file.Content)
 
 	var unusedImports []CodeIssue
 	for _, imp := range localImports {
-		if !usedNames[imp.name+"@"+file.Filename] && imp.name != "" {
+		isCrossFileUsed := usedNames[imp.name+"@"+file.Filename]
+		isLocallyUsed := counts[imp.name] > 1
+		if !isCrossFileUsed && !isLocallyUsed && imp.name != "" {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.line,
@@ -329,9 +484,39 @@ func buildResultPHP(file AnalyzeFile, defs []Definition, imports []Import, usedN
 		}
 	}
 
+	var unusedVars []CodeIssue
+	for _, d := range localDefs {
+		key := d.name + "@" + file.Filename
+		if !usedNames[key] {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: d.line,
+				Text: d.defType + " " + d.name,
+				File: file.Filename,
+			})
+		}
+	}
+
+	paramUsed := make(map[string]bool)
+	for _, p := range parameters {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		key := paramName + "@" + file.Filename
+		if usedNames[key] {
+			paramUsed[paramName] = true
+		}
+	}
+
+	var unusedParams []CodeIssue
+	for _, p := range parameters {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		if !paramUsed[paramName] {
+			unusedParams = append(unusedParams, p)
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
-		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Variables:  unusedVars,
+		Parameters: unusedParams,
 	}
 }

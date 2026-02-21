@@ -15,13 +15,14 @@ type CacheEntry struct {
 	result AnalysisResult
 }
 
-const analyzerCacheVersion = "2026-02-19-ruby-php-v2"
+const analyzerCacheVersion = "2026-02-20-ruby-php-v3"
 
 type MultiLangAnalyzer struct {
 	mu             sync.Mutex
 	cache          map[string]CacheEntry
 	allDefinitions map[string][]Definition
 	allImports     map[string][]Import
+	allParameters  map[string][]CodeIssue
 	parsedFiles    map[string]ParsedWorkspaceEntry
 	workspaceSig   string
 	workspaceRes   map[string]AnalysisResult
@@ -37,6 +38,7 @@ type ParsedWorkspaceEntry struct {
 	Lang        Language
 	Definitions []Definition
 	Imports     []Import
+	Parameters  []CodeIssue
 }
 
 func NewMultiLangAnalyzer() *MultiLangAnalyzer {
@@ -92,13 +94,15 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 	a.allDefinitions = make(map[string][]Definition)
 	a.allImports = make(map[string][]Import)
+	a.allParameters = make(map[string][]CodeIssue)
 
 	for _, file := range req.Files {
 		lang := DetectLanguage(file.Filename)
 
-		defs, imports := a.getParsedWorkspaceData(file, lang)
+		defs, imports, params := a.getParsedWorkspaceData(file, lang)
 		a.allDefinitions[file.Filename] = defs
 		a.allImports[file.Filename] = imports
+		a.allParameters[file.Filename] = params
 	}
 
 	usedNames := make(map[string]bool)
@@ -135,6 +139,40 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 				continue
 			}
 
+			impNames := strings.Split(imp.Name, ", ")
+			for _, impName := range impNames {
+				if impName == "" {
+					continue
+				}
+
+				isUsed := false
+
+				for _, otherFile := range req.Files {
+					if otherFile.Filename == file.Filename {
+						continue
+					}
+
+					otherContent := removeImportLines(otherFile.Content)
+					if strings.Contains(otherContent, impName) {
+						isUsed = true
+						break
+					}
+				}
+
+				if isUsed {
+					usedNames[impName+"@"+file.Filename] = true
+				} else {
+					usedNames[impName+"@"+file.Filename] = false
+				}
+			}
+		}
+
+		for _, param := range a.allParameters[file.Filename] {
+			paramName := strings.TrimSpace(strings.TrimSuffix(param.Text, " (parameter)"))
+			if paramName == "" {
+				continue
+			}
+
 			isUsed := false
 
 			for _, otherFile := range req.Files {
@@ -143,16 +181,16 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 				}
 
 				otherContent := removeImportLines(otherFile.Content)
-				if strings.Contains(otherContent, imp.Name) {
+				if strings.Contains(otherContent, paramName) {
 					isUsed = true
 					break
 				}
 			}
 
 			if isUsed {
-				usedNames[imp.Name+"@"+file.Filename] = true
+				usedNames[paramName+"@"+file.Filename] = true
 			} else {
-				usedNames[imp.Name+"@"+file.Filename] = false
+				usedNames[paramName+"@"+file.Filename] = false
 			}
 		}
 	}
@@ -164,7 +202,7 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 		switch lang {
 		case LangJavaScript, LangTypeScript:
-			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
+			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], a.allParameters[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
 			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
@@ -186,19 +224,20 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 	return WorkspaceAnalysisResult{Results: results}
 }
 
-func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Language) ([]Definition, []Import) {
+func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Language) ([]Definition, []Import, []CodeIssue) {
 	if cached, ok := a.parsedFiles[file.Filename]; ok {
 		if cached.Version == analyzerCacheVersion && cached.Hash == file.Hash && cached.Lang == lang {
-			return cached.Definitions, cached.Imports
+			return cached.Definitions, cached.Imports, cached.Parameters
 		}
 	}
 
 	var defs []Definition
 	var imports []Import
+	var params []CodeIssue
 
 	switch lang {
 	case LangJavaScript, LangTypeScript:
-		defs, imports, _, _ = analyzeJSTSForWorkspace(file.Content, file.Filename)
+		defs, imports, _, _, params = analyzeJSTSForWorkspace(file.Content, file.Filename)
 	case LangPython:
 		defs, imports, _, _ = analyzePythonForWorkspace(file.Content, file.Filename)
 	case LangGo:
@@ -210,6 +249,7 @@ func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Langua
 	default:
 		defs = []Definition{}
 		imports = []Import{}
+		params = []CodeIssue{}
 	}
 
 	a.parsedFiles[file.Filename] = ParsedWorkspaceEntry{
@@ -218,8 +258,9 @@ func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Langua
 		Lang:        lang,
 		Definitions: defs,
 		Imports:     imports,
+		Parameters:  params,
 	}
-	return defs, imports
+	return defs, imports, params
 }
 
 func workspaceSignature(files []AnalyzeFile) string {

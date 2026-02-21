@@ -25,6 +25,8 @@ const (
 	GoTokenRBrace
 	GoTokenComma
 	GoTokenDot
+	GoTokenColon
+	GoTokenEqual
 	GoTokenNewline
 	GoTokenEOF
 	GoTokenUnknown
@@ -176,6 +178,12 @@ func (t *GoTokenizer) Tokenize() []GoToken {
 		case '.':
 			t.next()
 			t.tokens = append(t.tokens, GoToken{Type: GoTokenDot, Value: ".", Line: t.line})
+		case ':':
+			t.next()
+			t.tokens = append(t.tokens, GoToken{Type: GoTokenColon, Value: ":", Line: t.line})
+		case '=':
+			t.next()
+			t.tokens = append(t.tokens, GoToken{Type: GoTokenEqual, Value: "=", Line: t.line})
 		default:
 			t.next()
 		}
@@ -221,6 +229,110 @@ type GoImportItem struct {
 	path  string
 	line  int
 	text  string
+}
+
+type GoVariable struct {
+	Name string
+	Line int
+	Type string
+}
+
+type GoParameter struct {
+	Name string
+	Line int
+}
+
+func FindGoVariables(content string) []GoVariable {
+	t := NewGoTokenizer(content)
+	tokens := t.Tokenize()
+
+	var vars []GoVariable
+
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+
+		if tok.Type == GoTokenVar || tok.Type == GoTokenConst {
+			if i+1 < len(tokens) && tokens[i+1].Type == GoTokenIdentifier {
+				name := tokens[i+1].Value
+				vars = append(vars, GoVariable{
+					Name: name,
+					Line: tokens[i+1].Line,
+					Type: "variable",
+				})
+			}
+		}
+
+		if tok.Type == GoTokenFunc {
+			if i+1 < len(tokens) && tokens[i+1].Type == GoTokenIdentifier {
+				name := tokens[i+1].Value
+				vars = append(vars, GoVariable{
+					Name: name,
+					Line: tokens[i+1].Line,
+					Type: "function",
+				})
+			}
+		}
+
+		if tok.Type == GoTokenTypeDef {
+			if i+1 < len(tokens) && tokens[i+1].Type == GoTokenIdentifier {
+				name := tokens[i+1].Value
+				vars = append(vars, GoVariable{
+					Name: name,
+					Line: tokens[i+1].Line,
+					Type: "type",
+				})
+			}
+		}
+
+		if tok.Type == GoTokenIdentifier && i+2 < len(tokens) {
+			if tokens[i+1].Type == GoTokenColon && tokens[i+2].Type == GoTokenEqual {
+				name := tok.Value
+				vars = append(vars, GoVariable{
+					Name: name,
+					Line: tok.Line,
+					Type: "variable",
+				})
+			}
+		}
+	}
+
+	return vars
+}
+
+func FindGoParameters(content string) []GoParameter {
+	t := NewGoTokenizer(content)
+	tokens := t.Tokenize()
+
+	var params []GoParameter
+
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type == GoTokenFunc {
+			i++
+			for i < len(tokens) && tokens[i].Type != GoTokenLParen {
+				i++
+			}
+			if i < len(tokens) && tokens[i].Type == GoTokenLParen {
+				i++
+				depth := 1
+				for i < len(tokens) && depth > 0 {
+					if tokens[i].Type == GoTokenLParen {
+						depth++
+					} else if tokens[i].Type == GoTokenRParen {
+						depth--
+					} else if tokens[i].Type == GoTokenIdentifier && depth == 1 {
+						params = append(params, GoParameter{
+							Name: tokens[i].Value,
+							Line: tokens[i].Line,
+						})
+					}
+					i++
+				}
+			}
+		}
+	}
+
+	return params
 }
 
 func FindGoImports(content string) []GoImportItem {
@@ -306,6 +418,8 @@ func FindUsedGoNames(content string) map[string]int {
 func analyzeGo(content, filename string) AnalysisResult {
 	imports := FindGoImports(content)
 	counts := FindUsedGoNames(content)
+	vars := FindGoVariables(content)
+	params := FindGoParameters(content)
 
 	var unusedImports []CodeIssue
 	for _, imp := range imports {
@@ -319,16 +433,41 @@ func analyzeGo(content, filename string) AnalysisResult {
 		}
 	}
 
+	var unusedVars []CodeIssue
+	for _, v := range vars {
+		if counts[v.Name] <= 1 {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: v.Line,
+				Text: v.Name + " (" + v.Type + ")",
+				File: filename,
+			})
+		}
+	}
+
+	var unusedParams []CodeIssue
+	for _, p := range params {
+		if counts[p.Name] <= 1 {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: p.Name + " (parameter)",
+				File: filename,
+			})
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
-		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Variables:  unusedVars,
+		Parameters: unusedParams,
 	}
 }
 
 func analyzeGoForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue) {
 	imports := FindGoImports(content)
 	counts := FindUsedGoNames(content)
+	vars := FindGoVariables(content)
 
 	var outImports []Import
 	var unusedImports []CodeIssue
@@ -350,15 +489,29 @@ func analyzeGoForWorkspace(content, filename string) ([]Definition, []Import, []
 		}
 	}
 
-	return []Definition{}, outImports, unusedImports, []CodeIssue{}
+	var defs []Definition
+	for _, v := range vars {
+		defs = append(defs, Definition{
+			Name: v.Name,
+			File: filename,
+			Line: v.Line,
+		})
+	}
+
+	return defs, outImports, unusedImports, []CodeIssue{}
 }
 
 func buildResultGo(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
 	localImports := FindGoImports(file.Content)
+	counts := FindUsedGoNames(file.Content)
+	vars := FindGoVariables(file.Content)
+	params := FindGoParameters(file.Content)
 
 	var unusedImports []CodeIssue
 	for _, imp := range localImports {
-		if !usedNames[imp.name+"@"+file.Filename] && imp.name != "" {
+		isCrossFileUsed := usedNames[imp.name+"@"+file.Filename]
+		isLocallyUsed := counts[imp.name] > 1
+		if !isCrossFileUsed && !isLocallyUsed && imp.name != "" {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.line,
@@ -368,9 +521,35 @@ func buildResultGo(file AnalyzeFile, defs []Definition, imports []Import, usedNa
 		}
 	}
 
+	var unusedVars []CodeIssue
+	for _, v := range vars {
+		isCrossFileUsed := usedNames[v.Name+"@"+file.Filename]
+		isLocallyUsed := counts[v.Name] > 1
+		if !isCrossFileUsed && !isLocallyUsed {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: v.Line,
+				Text: v.Name + " (" + v.Type + ")",
+				File: file.Filename,
+			})
+		}
+	}
+
+	var unusedParams []CodeIssue
+	for _, p := range params {
+		if counts[p.Name] <= 1 {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: p.Name + " (parameter)",
+				File: file.Filename,
+			})
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
-		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Variables:  unusedVars,
+		Parameters: unusedParams,
 	}
 }

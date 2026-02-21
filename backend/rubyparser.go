@@ -70,6 +70,8 @@ func (t *RubyTokenizer) next() rune {
 func (t *RubyTokenizer) Tokenize() []RubyToken {
 	inString := false
 	var stringChar rune
+	var stringStart int
+	var stringLine int
 
 	for t.pos < len(t.content) {
 		ch := t.peek()
@@ -78,6 +80,7 @@ func (t *RubyTokenizer) Tokenize() []RubyToken {
 			if ch == stringChar && t.pos > 0 && t.content[t.pos-1] != '\\' {
 				t.next()
 				inString = false
+				t.tokens = append(t.tokens, RubyToken{Type: RubyTokenString, Value: t.content[stringStart:t.pos], Line: stringLine})
 			} else {
 				t.next()
 			}
@@ -109,6 +112,8 @@ func (t *RubyTokenizer) Tokenize() []RubyToken {
 		if ch == '"' || ch == '\'' {
 			inString = true
 			stringChar = ch
+			stringStart = t.pos
+			stringLine = t.line
 			t.next()
 			continue
 		}
@@ -187,9 +192,21 @@ func FindRubyImports(content string) []RubyImportItem {
 
 	var i int
 	for i < len(tokens) {
-		if tokens[i].Type == RubyTokenRequire && i+1 < len(tokens) && tokens[i+1].Type == RubyTokenString {
+		if (tokens[i].Type == RubyTokenRequire || tokens[i].Type == RubyTokenRequireRelative) && i+1 < len(tokens) {
 			line := tokens[i].Line
-			path := strings.Trim(tokens[i+1].Value, `"`)
+
+			var path string
+			if tokens[i+1].Type == RubyTokenString {
+				path = strings.Trim(tokens[i+1].Value, `"'`)
+			} else if tokens[i+1].Type == RubyTokenIdentifier {
+				path = tokens[i+1].Value
+			}
+
+			if path == "" {
+				i++
+				continue
+			}
+
 			name := path
 			if strings.Contains(path, "/") {
 				parts := strings.Split(path, "/")
@@ -197,31 +214,21 @@ func FindRubyImports(content string) []RubyImportItem {
 			}
 			name = strings.TrimSuffix(name, ".rb")
 
-			imports = append(imports, RubyImportItem{
-				name: name,
-				path: path,
-				line: line,
-				text: "require " + tokens[i+1].Value,
-			})
-			i += 2
-			continue
-		}
-
-		if tokens[i].Type == RubyTokenRequireRelative && i+1 < len(tokens) && tokens[i+1].Type == RubyTokenString {
-			line := tokens[i].Line
-			path := strings.Trim(tokens[i+1].Value, `"`)
-			name := path
-			if strings.Contains(path, "/") {
-				parts := strings.Split(path, "/")
-				name = parts[len(parts)-1]
+			text := "require"
+			if tokens[i].Type == RubyTokenRequireRelative {
+				text = "require_relative"
 			}
-			name = strings.TrimSuffix(name, ".rb")
+			if tokens[i+1].Type == RubyTokenString {
+				text += " " + tokens[i+1].Value
+			} else {
+				text += " " + path
+			}
 
 			imports = append(imports, RubyImportItem{
 				name: name,
 				path: path,
 				line: line,
-				text: "require_relative " + tokens[i+1].Value,
+				text: text,
 			})
 			i += 2
 			continue
@@ -231,6 +238,99 @@ func FindRubyImports(content string) []RubyImportItem {
 	}
 
 	return imports
+}
+
+type RubyDefinition struct {
+	name    string
+	defType string
+	line    int
+}
+
+func FindRubyDefinitions(content string) []RubyDefinition {
+	t := NewRubyTokenizer(content)
+	tokens := t.Tokenize()
+
+	var defs []RubyDefinition
+
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == RubyTokenDef && i+1 < len(tokens) {
+			name := ""
+			if tokens[i+1].Type == RubyTokenIdentifier {
+				if strings.Contains(tokens[i+1].Value, ".") {
+					parts := strings.Split(tokens[i+1].Value, ".")
+					name = parts[len(parts)-1]
+				} else {
+					name = tokens[i+1].Value
+				}
+				defs = append(defs, RubyDefinition{
+					name:    name,
+					defType: "method",
+					line:    tokens[i].Line,
+				})
+			}
+		}
+		if tokens[i].Type == RubyTokenClass && i+1 < len(tokens) && tokens[i+1].Type == RubyTokenIdentifier {
+			defs = append(defs, RubyDefinition{
+				name:    tokens[i+1].Value,
+				defType: "class",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Type == RubyTokenModule && i+1 < len(tokens) && tokens[i+1].Type == RubyTokenIdentifier {
+			defs = append(defs, RubyDefinition{
+				name:    tokens[i+1].Value,
+				defType: "module",
+				line:    tokens[i].Line,
+			})
+		}
+	}
+
+	return defs
+}
+
+func FindRubyParameters(content, filename string) []CodeIssue {
+	t := NewRubyTokenizer(content)
+	tokens := t.Tokenize()
+
+	var params []CodeIssue
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == RubyTokenDef && i+1 < len(tokens) && tokens[i+1].Type == RubyTokenIdentifier {
+			parenCount := 0
+			paramStart := -1
+			for j := i + 2; j < len(tokens); j++ {
+				if tokens[j].Type == RubyTokenLParen {
+					if parenCount == 0 {
+						paramStart = j + 1
+					}
+					parenCount++
+				}
+				if tokens[j].Type == RubyTokenRParen {
+					parenCount--
+					if parenCount == 0 {
+						break
+					}
+				}
+			}
+
+			if paramStart > 0 && paramStart < len(tokens) {
+				for j := paramStart; j < len(tokens) && tokens[j].Type != RubyTokenRParen; j++ {
+					if tokens[j].Type == RubyTokenIdentifier && j+1 < len(tokens) && (tokens[j+1].Type == RubyTokenComma || tokens[j+1].Type == RubyTokenRParen) {
+						paramName := tokens[j].Value
+						if paramName != "" && paramName != "self" && paramName != "cls" {
+							params = append(params, CodeIssue{
+								ID:   generateUUID(),
+								Line: tokens[j].Line,
+								Text: paramName + " (parameter)",
+								File: filename,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return params
 }
 
 func FindUsedRubyNames(content string) map[string]int {
@@ -283,10 +383,12 @@ func analyzeRuby(content, filename string) AnalysisResult {
 
 func analyzeRubyForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue) {
 	imports := FindRubyImports(content)
+	defs := FindRubyDefinitions(content)
 	counts := FindUsedRubyNames(content)
 
 	var outImports []Import
 	var unusedImports []CodeIssue
+	var outDefs []Definition
 
 	for _, imp := range imports {
 		outImports = append(outImports, Import{
@@ -305,15 +407,29 @@ func analyzeRubyForWorkspace(content, filename string) ([]Definition, []Import, 
 		}
 	}
 
-	return []Definition{}, outImports, unusedImports, []CodeIssue{}
+	for _, d := range defs {
+		outDefs = append(outDefs, Definition{
+			Name: d.name,
+			Type: d.defType,
+			Line: d.line,
+			File: filename,
+		})
+	}
+
+	return outDefs, outImports, unusedImports, []CodeIssue{}
 }
 
 func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
 	localImports := FindRubyImports(file.Content)
+	localDefs := FindRubyDefinitions(file.Content)
+	parameters := FindRubyParameters(file.Content, file.Filename)
+	counts := FindUsedRubyNames(file.Content)
 
 	var unusedImports []CodeIssue
 	for _, imp := range localImports {
-		if !usedNames[imp.name+"@"+file.Filename] && imp.name != "" {
+		isCrossFileUsed := usedNames[imp.name+"@"+file.Filename]
+		isLocallyUsed := counts[imp.name] > 1
+		if !isCrossFileUsed && !isLocallyUsed && imp.name != "" {
 			unusedImports = append(unusedImports, CodeIssue{
 				ID:   generateUUID(),
 				Line: imp.line,
@@ -323,9 +439,39 @@ func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, used
 		}
 	}
 
+	var unusedVars []CodeIssue
+	for _, d := range localDefs {
+		key := d.name + "@" + file.Filename
+		if !usedNames[key] {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: d.line,
+				Text: d.defType + " " + d.name,
+				File: file.Filename,
+			})
+		}
+	}
+
+	paramUsed := make(map[string]bool)
+	for _, p := range parameters {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		key := paramName + "@" + file.Filename
+		if usedNames[key] {
+			paramUsed[paramName] = true
+		}
+	}
+
+	var unusedParams []CodeIssue
+	for _, p := range parameters {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		if !paramUsed[paramName] {
+			unusedParams = append(unusedParams, p)
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
-		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Variables:  unusedVars,
+		Parameters: unusedParams,
 	}
 }

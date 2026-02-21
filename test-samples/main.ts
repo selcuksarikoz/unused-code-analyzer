@@ -1,13 +1,18 @@
-import { usedFunction, usedConst, UsedClass, anotherName } from "./utils";
+import { usedFunction, usedConst } from "./utils";
+import type { UsedInterface, UsedType } from "./utils";
+import * as UtilsNamespace from "./utils";
 
 const result = usedFunction();
 console.log(result, usedConst);
 
-const obj = new UsedClass("test");
-console.log(obj.name);
+const iface: UsedInterface = { id: 1 };
+console.log(iface);
 
-anotherName();
+UtilsNamespace.usedFunction();
 
-import * as vscode from "vscode";
+export { usedFunction as reExported };
+export type { UsedInterface as ReExportedInterface } from "./utils";
 
-vscode.window.showInformationMessage("test");
+import { unusedImport } from "./utils";
+
+console.log("local");

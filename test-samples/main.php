@@ -11,3 +11,21 @@ echo $obj->hello();
 
 echo used_function();
 echo USED_CONST;
+
+trait MyTrait {
+    use Utils\UsedTrait;
+}
+
+interface MyInterface extends Utils\UsedInterface {
+}
+
+class MyImplementation implements Utils\UsedInterface {
+    public function getId(): int {
+        return 1;
+    }
+}
+
+$unused_local = "unused";
+
+function local_function() {
+}

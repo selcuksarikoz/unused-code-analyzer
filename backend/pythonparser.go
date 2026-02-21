@@ -299,6 +299,83 @@ func FindPythonImports(content string) []PyImportItem {
 	return imports
 }
 
+type PyDefinition struct {
+	name    string
+	defType string
+	line    int
+}
+
+func FindPythonDefinitions(content string) []PyDefinition {
+	t := NewPyTokenizer(content)
+	tokens := t.Tokenize()
+
+	var defs []PyDefinition
+
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == PyTokenDef && i+1 < len(tokens) && tokens[i+1].Type == PyTokenIdentifier {
+			defs = append(defs, PyDefinition{
+				name:    tokens[i+1].Value,
+				defType: "function",
+				line:    tokens[i].Line,
+			})
+		}
+		if tokens[i].Type == PyTokenClass && i+1 < len(tokens) && tokens[i+1].Type == PyTokenIdentifier {
+			defs = append(defs, PyDefinition{
+				name:    tokens[i+1].Value,
+				defType: "class",
+				line:    tokens[i].Line,
+			})
+		}
+	}
+
+	return defs
+}
+
+func FindPythonParameters(content, filename string) []CodeIssue {
+	t := NewPyTokenizer(content)
+	tokens := t.Tokenize()
+
+	var params []CodeIssue
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].Type == PyTokenDef && i+1 < len(tokens) && tokens[i+1].Type == PyTokenIdentifier {
+			parenCount := 0
+			paramStart := -1
+			for j := i + 2; j < len(tokens); j++ {
+				if tokens[j].Type == PyTokenLParen {
+					if parenCount == 0 {
+						paramStart = j + 1
+					}
+					parenCount++
+				}
+				if tokens[j].Type == PyTokenRParen {
+					parenCount--
+					if parenCount == 0 {
+						break
+					}
+				}
+			}
+
+			if paramStart > 0 && paramStart < len(tokens) {
+				for j := paramStart; j < len(tokens) && tokens[j].Type != PyTokenRParen; j++ {
+					if tokens[j].Type == PyTokenIdentifier && j+1 < len(tokens) && (tokens[j+1].Type == PyTokenComma || tokens[j+1].Type == PyTokenRParen) {
+						paramName := tokens[j].Value
+						if paramName != "" && paramName != "self" && paramName != "cls" {
+							params = append(params, CodeIssue{
+								ID:   generateUUID(),
+								Line: tokens[j].Line,
+								Text: paramName + " (parameter)",
+								File: filename,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return params
+}
+
 func FindUsedPythonNames(content string) map[string]int {
 	t := NewPyTokenizer(content)
 	tokens := t.Tokenize()
@@ -315,8 +392,22 @@ func FindUsedPythonNames(content string) map[string]int {
 		"global": true, "nonlocal": true, "assert": true, "raise": true,
 	}
 
+	inImport := false
+
 	for _, tok := range tokens {
+		if tok.Type == PyTokenImport || tok.Type == PyTokenFrom {
+			inImport = true
+			continue
+		}
+		if inImport && tok.Type == PyTokenNewline {
+			inImport = false
+			continue
+		}
+
 		if tok.Type == PyTokenIdentifier && !reserved[tok.Value] {
+			if inImport {
+				continue
+			}
 			counts[tok.Value]++
 		}
 	}
@@ -326,6 +417,7 @@ func FindUsedPythonNames(content string) map[string]int {
 
 func analyzePython(content, filename string) AnalysisResult {
 	imports := FindPythonImports(content)
+	params := FindPythonParameters(content, filename)
 	counts := FindUsedPythonNames(content)
 
 	var unusedImports []CodeIssue
@@ -351,19 +443,35 @@ func analyzePython(content, filename string) AnalysisResult {
 		}
 	}
 
+	var unusedParams []CodeIssue = []CodeIssue{}
+	for _, p := range params {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		isLocallyUsed := counts[paramName] > 1
+		if !isLocallyUsed {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: "parameter " + paramName,
+				File: filename,
+			})
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
 		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Parameters: unusedParams,
 	}
 }
 
 func analyzePythonForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue) {
 	imports := FindPythonImports(content)
+	defs := FindPythonDefinitions(content)
 	counts := FindUsedPythonNames(content)
 
 	var outImports []Import
 	var unusedImports []CodeIssue
+	var outDefs []Definition
 
 	for _, imp := range imports {
 		outImports = append(outImports, Import{
@@ -389,22 +497,38 @@ func analyzePythonForWorkspace(content, filename string) ([]Definition, []Import
 		}
 	}
 
-	return []Definition{}, outImports, unusedImports, []CodeIssue{}
+	for _, d := range defs {
+		outDefs = append(outDefs, Definition{
+			Name: d.name,
+			Type: d.defType,
+			Line: d.line,
+			File: filename,
+		})
+	}
+
+	return outDefs, outImports, unusedImports, []CodeIssue{}
 }
 
 func buildResultPython(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
 	localImports := FindPythonImports(file.Content)
+	localDefs := FindPythonDefinitions(file.Content)
+	localParams := FindPythonParameters(file.Content, file.Filename)
+	counts := FindUsedPythonNames(file.Content)
 
 	var unusedImports []CodeIssue
 	for _, imp := range localImports {
 		allUnused := true
 		for _, name := range imp.names {
-			if usedNames[name+"@"+file.Filename] {
+			isCrossFileUsed := usedNames[name+"@"+file.Filename]
+			isLocallyUsed := counts[name] > 0
+			if isCrossFileUsed || isLocallyUsed {
 				allUnused = false
 				break
 			}
 			if alias, ok := imp.alias[name]; ok {
-				if usedNames[alias+"@"+file.Filename] {
+				isAliasCrossFileUsed := usedNames[alias+"@"+file.Filename]
+				isAliasLocallyUsed := counts[alias] > 0
+				if isAliasCrossFileUsed || isAliasLocallyUsed {
 					allUnused = false
 					break
 				}
@@ -420,9 +544,37 @@ func buildResultPython(file AnalyzeFile, defs []Definition, imports []Import, us
 		}
 	}
 
+	var unusedVars []CodeIssue
+	for _, d := range localDefs {
+		isCrossFileUsed := usedNames[d.name+"@"+file.Filename]
+		isLocallyUsed := counts[d.name] > 1
+		if !isCrossFileUsed && !isLocallyUsed {
+			unusedVars = append(unusedVars, CodeIssue{
+				ID:   generateUUID(),
+				Line: d.line,
+				Text: d.defType + " " + d.name,
+				File: file.Filename,
+			})
+		}
+	}
+
+	var unusedParams []CodeIssue = []CodeIssue{}
+	for _, p := range localParams {
+		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
+		isLocallyUsed := counts[paramName] > 1
+		if !isLocallyUsed {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: "parameter " + paramName,
+				File: file.Filename,
+			})
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
-		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Variables:  unusedVars,
+		Parameters: unusedParams,
 	}
 }

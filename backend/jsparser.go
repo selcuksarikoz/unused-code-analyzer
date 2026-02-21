@@ -585,6 +585,7 @@ func FindJSParameters(content string) []JSParameter {
 
 func analyzeJSTS(content, filename string) AnalysisResult {
 	imports := FindJSImports(content)
+	params := FindJSParameters(content)
 	counts := FindUsedJSNames(content)
 
 	var unusedImports []CodeIssue
@@ -606,16 +607,30 @@ func analyzeJSTS(content, filename string) AnalysisResult {
 		}
 	}
 
+	var unusedParams []CodeIssue = []CodeIssue{}
+	for _, p := range params {
+		isLocallyUsed := counts[p.Name] > 1
+		if !isLocallyUsed {
+			unusedParams = append(unusedParams, CodeIssue{
+				ID:   generateUUID(),
+				Line: p.Line,
+				Text: p.Name + " (parameter)",
+				File: filename,
+			})
+		}
+	}
+
 	return AnalysisResult{
 		Imports:    unusedImports,
 		Variables:  []CodeIssue{},
-		Parameters: []CodeIssue{},
+		Parameters: unusedParams,
 	}
 }
 
-func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue) {
+func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, []CodeIssue, []CodeIssue, []CodeIssue) {
 	imports := FindJSImports(content)
 	variables := FindJSVariables(content)
+	params := FindJSParameters(content)
 
 	var allImportNames []string
 	for _, imp := range imports {
@@ -671,10 +686,20 @@ func analyzeJSTSForWorkspace(content, filename string) ([]Definition, []Import, 
 		})
 	}
 
-	return outDefs, outImports, unusedImports, unusedVars
+	var unusedParams []CodeIssue
+	for _, p := range params {
+		unusedParams = append(unusedParams, CodeIssue{
+			ID:   generateUUID(),
+			Line: p.Line,
+			Text: p.Name + " (parameter)",
+			File: filename,
+		})
+	}
+
+	return outDefs, outImports, unusedImports, unusedVars, unusedParams
 }
 
-func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
+func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, params []CodeIssue, usedNames map[string]bool, allFiles []AnalyzeFile) AnalysisResult {
 	localImports := FindJSImports(file.Content)
 	localVars := FindJSVariables(file.Content)
 	localParams := FindJSParameters(file.Content)
@@ -685,7 +710,9 @@ func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, used
 	for _, imp := range localImports {
 		allUnused := true
 		for _, name := range imp.names {
-			if usedNames[name+"@"+file.Filename] {
+			isCrossFileUsed := usedNames[name+"@"+file.Filename]
+			isLocallyUsed := counts[name] > 0
+			if isCrossFileUsed || isLocallyUsed {
 				allUnused = false
 				break
 			}
@@ -718,7 +745,8 @@ func buildResultJSTS(file AnalyzeFile, defs []Definition, imports []Import, used
 	var unusedParams []CodeIssue
 	for _, p := range localParams {
 		isLocallyUsed := counts[p.Name] > 1
-		if !isLocallyUsed {
+		isCrossFileUsed := usedNames[p.Name+"@"+file.Filename]
+		if !isLocallyUsed && !isCrossFileUsed {
 			unusedParams = append(unusedParams, CodeIssue{
 				ID:   generateUUID(),
 				Line: p.Line,

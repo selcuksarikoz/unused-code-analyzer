@@ -1,4 +1,3 @@
-# utils.py
 def used_function():
     return "hello"
 
@@ -16,3 +15,15 @@ def unused_function():
 
 
 UNUSED_CONST = 123
+
+
+class UnusedClass:
+    pass
+
+
+def func_with_unused_param(a, b, unused):
+    print(a, b)
+
+
+def func_with_unused_return():
+    return 1

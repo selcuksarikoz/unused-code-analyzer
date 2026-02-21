@@ -23,4 +23,7 @@ scripts/**
 .vscode/**
 tsconfig.json
 src/**
+
+# tests
+test-wasm.js
 test-samples/**
