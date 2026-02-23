@@ -2,11 +2,11 @@
   "name": "get-unused-imports",
   "displayName": "Unused Code Analyzer",
   "description": "Detect unused imports, variables, and parameters across your workspace after opening the Unused Code activity view",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "selcuksarikoz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/selcuksarikoz/get-unused-imports"
+    "url": "https://github.com/selcuksarikoz/unused-code-analyzer"
   },
   "icon": "assets/icons/logo.png",
   "engines": {
