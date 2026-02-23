@@ -17,6 +17,7 @@ assets/.DS_Store
 # Exclude dev directories and files
 .git/**
 .gitignore
+.ruff_cache
 backend/**
 scripts/**
 *.vsix
