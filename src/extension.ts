@@ -151,6 +151,7 @@ class Extension implements vscode.Disposable {
   private wasmService: WasmService;
   private treeProvider: ResultsTreeProvider;
   private treeView: vscode.TreeView<vscode.TreeItem> | undefined;
+  private hasActivityViewOpened = false;
   private isScanning = false;
   private decorationCollection: vscode.TextEditorDecorationType[] = [];
   private autoAnalyzeTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -207,7 +208,7 @@ class Extension implements vscode.Disposable {
 
     this.context.subscriptions.push(
       vscode.workspace.onDidSaveTextDocument(async (doc) => {
-        if (!this.isAutoAnalyzerEnabled()) {
+        if (!this.canAutoAnalyzeNow()) {
           return;
         }
 
@@ -228,7 +229,7 @@ class Extension implements vscode.Disposable {
 
     this.context.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument(async (event) => {
-        if (!this.isAutoAnalyzerEnabled()) {
+        if (!this.canAutoAnalyzeNow()) {
           return;
         }
 
@@ -257,6 +258,10 @@ class Extension implements vscode.Disposable {
     content: string,
     language: string,
   ): Promise<void> {
+    if (!this.canAutoAnalyzeNow()) {
+      return;
+    }
+
     if (this.autoAnalyzeTimeout) {
       clearTimeout(this.autoAnalyzeTimeout);
     }
@@ -423,15 +428,20 @@ class Extension implements vscode.Disposable {
 
   async init(): Promise<void> {
     await this.wasmService.initialize();
-    if (
-      this.isAutoAnalyzerEnabled() &&
-      vscode.workspace.workspaceFolders &&
-      vscode.workspace.workspaceFolders.length > 0
-    ) {
-      this.scanWorkspace().catch((error) => {
-        console.error("[Extension] Initial workspace scan failed:", error);
-      });
+  }
+
+  private canAutoAnalyzeNow(): boolean {
+    return this.isAutoAnalyzerEnabled() && this.hasActivityViewOpened;
+  }
+
+  private async ensureActivityViewOpened(): Promise<void> {
+    if (this.hasActivityViewOpened) {
+      return;
     }
+
+    await vscode.commands.executeCommand(
+      "workbench.view.extension.get-unused-imports",
+    );
   }
 
   private registerCommands(): void {
@@ -542,7 +552,11 @@ class Extension implements vscode.Disposable {
 
     this.treeView.onDidChangeVisibility(async (e) => {
       console.log("[Extension] TreeView visibility changed:", e.visible);
-      if (e.visible && this.isAutoAnalyzerEnabled()) {
+      if (e.visible) {
+        this.hasActivityViewOpened = true;
+      }
+
+      if (e.visible && this.canAutoAnalyzeNow()) {
         const results = this.treeProvider.getResults();
         console.log("[Extension] Current results count:", results.length);
         if (results.length === 0) {
@@ -552,10 +566,16 @@ class Extension implements vscode.Disposable {
       }
     });
 
+    if (this.treeView.visible) {
+      this.hasActivityViewOpened = true;
+    }
+
     this.context.subscriptions.push(this.treeView);
   }
 
   private async scanWorkspace(): Promise<void> {
+    await this.ensureActivityViewOpened();
+
     if (this.isScanning) {
       return;
     }
@@ -622,9 +642,7 @@ class Extension implements vscode.Disposable {
 
   private async scanFile(uri?: vscode.Uri): Promise<void> {
     try {
-      vscode.commands.executeCommand(
-        "workbench.view.extension.get-unused-imports",
-      );
+      await this.ensureActivityViewOpened();
 
       const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (!targetUri) {
@@ -681,9 +699,7 @@ class Extension implements vscode.Disposable {
       return;
     }
 
-    vscode.commands.executeCommand(
-      "workbench.view.extension.get-unused-imports",
-    );
+    await this.ensureActivityViewOpened();
 
     const targetUri = uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!targetUri) {
@@ -767,7 +783,7 @@ export async function activate(
       error,
     );
     vscode.window.showWarningMessage(
-      "Get Unused Imports initialized with limited capabilities. JS/TS analysis is still available.",
+      "Unused Code Analyzer initialized with limited capabilities. JS/TS analysis is still available.",
     );
   }
 }

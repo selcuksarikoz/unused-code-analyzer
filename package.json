@@ -1,7 +1,7 @@
 {
   "name": "get-unused-imports",
-  "displayName": "Get Unused Imports",
-  "description": "Detect and remove unused imports, variables, and parameters in TypeScript, JavaScript, Python, Go, Ruby, and PHP code",
+  "displayName": "Unused Code Analyzer",
+  "description": "Detect unused imports, variables, and parameters across your workspace after opening the Unused Code activity view",
   "version": "0.1.2",
   "publisher": "selcuksarikoz",
   "repository": {
@@ -34,7 +34,6 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished",
     "onView:get-unused-imports.results",
     "onCommand:get-unused-imports.scanWorkspace",
     "onCommand:get-unused-imports.scanFile",
@@ -42,7 +41,7 @@
   ],
   "contributes": {
     "configuration": {
-      "title": "Get Unused Imports",
+      "title": "Unused Code Analyzer",
       "properties": {
         "get-unused-imports.excludeFolders": {
           "type": "array",
@@ -75,7 +74,7 @@
         "get-unused-imports.autoAnalyzer": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically analyze files on save and when treeview is opened"
+          "description": "Automatically analyze files on save after the Unused Code activity view has been opened at least once"
         },
         "get-unused-imports.autoAnalyzeDelay": {
           "type": "number",
