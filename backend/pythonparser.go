@@ -562,7 +562,8 @@ func buildResultPython(file AnalyzeFile, defs []Definition, imports []Import, us
 	for _, p := range localParams {
 		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
 		isLocallyUsed := counts[paramName] > 1
-		if !isLocallyUsed {
+		isCrossFileUsed := usedNames[paramName+"@"+file.Filename]
+		if !isLocallyUsed && !isCrossFileUsed {
 			unusedParams = append(unusedParams, CodeIssue{
 				ID:   generateUUID(),
 				Line: p.Line,

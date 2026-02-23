@@ -1,72 +1,103 @@
-const { analyzeWorkspace } = require('./backend/main.wasm');
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
-const workspace = {
-  Files: [
-    {
-      Filename: "goproject/main.go",
-      Content: `package main
+const projectRoot = path.resolve(__dirname, "..");
+const wasmPath = path.join(projectRoot, "out", "main.wasm");
+const wasmExecPath = path.join(projectRoot, "out", "wasm_exec.js");
 
-import (
-	"fmt"
-	"goproject/utils"
-)
-
-func main() {
-	fmt.Println("Starting application...")
-	utils.PrintHello()
-	unusedVariable := 42 // This should be detected as unused
-	fmt.Println("Application started!")
+if (!fs.existsSync(wasmPath) || !fs.existsSync(wasmExecPath)) {
+  console.error("WASM artifacts are missing. Run: bash scripts/build.sh");
+  process.exit(1);
 }
 
-func unusedFunction() {
-	fmt.Println("This function is never called")
+require(wasmExecPath);
+
+function normalizeResult(rawResult) {
+  const parsed = JSON.parse(rawResult);
+  const results = parsed.Results || parsed.results || {};
+  const normalized = {};
+  for (const [filename, issues] of Object.entries(results)) {
+    normalized[filename] = {
+      imports: issues?.imports || issues?.Imports || [],
+      variables: issues?.variables || issues?.Variables || [],
+      parameters: issues?.parameters || issues?.Parameters || [],
+    };
+  }
+  return normalized;
 }
 
-var unusedGlobal = 100 // This should be detected as unused`,
-      Hash: "hash1"
-    },
-    {
-      Filename: "goproject/utils/utils.go",
-      Content: `package utils
-
-import "fmt"
-
-func PrintHello() {
-	fmt.Println("Hello from utils!")
+async function loadWasmAnalyzer() {
+  const go = new Go();
+  const wasmBytes = fs.readFileSync(wasmPath);
+  const { instance } = await WebAssembly.instantiate(wasmBytes, go.importObject);
+  go.run(instance);
 }
 
-func unusedFunction() {
-	fmt.Println("This function is never called")
+async function main() {
+  await loadWasmAnalyzer();
+
+  const workspace = {
+    files: [
+      {
+        filename: "a.go",
+        hash: "1",
+        content: [
+          "package main",
+          "",
+          'import "foo"',
+          "",
+          "func main() {}",
+        ].join("\n"),
+      },
+      {
+        filename: "b.go",
+        hash: "2",
+        content: [
+          "package main",
+          "",
+          "func test() {",
+          "  foobar := 1",
+          "  _ = foobar",
+          "}",
+        ].join("\n"),
+      },
+      {
+        filename: "c.go",
+        hash: "3",
+        content: [
+          "package main",
+          "",
+          "func usesImport() {",
+          "  foo.Println()",
+          "}",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  const results = normalizeResult(globalThis.analyzeWorkspace(JSON.stringify(workspace)));
+
+  assert(results["a.go"], "missing result for a.go");
+
+  const importIssues = results["a.go"].imports.map((x) => x.text);
+  assert.strictEqual(
+    importIssues.length,
+    0,
+    "import foo should be treated as used when another file references exact identifier foo",
+  );
+
+  const bIssues = results["b.go"].imports.map((x) => x.text);
+  assert.strictEqual(
+    bIssues.length,
+    0,
+    "b.go has no imports and should not receive import issues",
+  );
+
+  console.log("test-wasm-go.js passed");
 }
 
-var unusedGlobal = 100 // This should be detected as unused`,
-      Hash: "hash2"
-    },
-    {
-      Filename: "goproject/feature.go",
-      Content: `package main
-
-import (
-	"fmt"
-	"goproject/utils"
-)
-
-func main() {
-	fmt.Println("Starting feature...")
-	utils.PrintHello()
-	unusedVariable := 42 // This should be detected as unused
-	fmt.Println("Feature started!")
-}
-
-func unusedFunction() {
-	fmt.Println("This function is never called")
-}
-
-var unusedGlobal = 100 // This should be detected as unused`,
-      Hash: "hash3"
-    }
-  ]
-};
-
-const result = analyzeWorkspace(JSON.stringify(workspace));
-console.log(JSON.stringify(JSON.parse(result), null, 2));
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

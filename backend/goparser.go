@@ -537,7 +537,9 @@ func buildResultGo(file AnalyzeFile, defs []Definition, imports []Import, usedNa
 
 	var unusedParams []CodeIssue
 	for _, p := range params {
-		if counts[p.Name] <= 1 {
+		isCrossFileUsed := usedNames[p.Name+"@"+file.Filename]
+		isLocallyUsed := counts[p.Name] > 1
+		if !isCrossFileUsed && !isLocallyUsed {
 			unusedParams = append(unusedParams, CodeIssue{
 				ID:   generateUUID(),
 				Line: p.Line,

@@ -442,7 +442,8 @@ func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, used
 	var unusedVars []CodeIssue
 	for _, d := range localDefs {
 		key := d.name + "@" + file.Filename
-		if !usedNames[key] {
+		isLocallyUsed := counts[d.name] > 1
+		if !usedNames[key] && !isLocallyUsed {
 			unusedVars = append(unusedVars, CodeIssue{
 				ID:   generateUUID(),
 				Line: d.line,
@@ -456,7 +457,8 @@ func buildResultRuby(file AnalyzeFile, defs []Definition, imports []Import, used
 	for _, p := range parameters {
 		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
 		key := paramName + "@" + file.Filename
-		if usedNames[key] {
+		isLocallyUsed := counts[paramName] > 1
+		if usedNames[key] || isLocallyUsed {
 			paramUsed[paramName] = true
 		}
 	}

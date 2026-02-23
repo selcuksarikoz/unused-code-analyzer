@@ -107,31 +107,28 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 	usedNames := make(map[string]bool)
 
+	isNameUsedInOtherFiles := func(currentFilename, name string) bool {
+		if name == "" {
+			return false
+		}
+		for _, otherFile := range req.Files {
+			if otherFile.Filename == currentFilename {
+				continue
+			}
+			otherContent := removeImportLines(otherFile.Content)
+			if containsWord(otherContent, name) {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, file := range req.Files {
 		for _, def := range a.allDefinitions[file.Filename] {
 			if def.Name == "" {
 				continue
 			}
-
-			isUsed := false
-
-			for _, otherFile := range req.Files {
-				if otherFile.Filename == file.Filename {
-					continue
-				}
-
-				otherContent := removeImportLines(otherFile.Content)
-				if strings.Contains(otherContent, def.Name) {
-					isUsed = true
-					break
-				}
-			}
-
-			if isUsed {
-				usedNames[def.Name+"@"+file.Filename] = true
-			} else {
-				usedNames[def.Name+"@"+file.Filename] = false
-			}
+			usedNames[def.Name+"@"+file.Filename] = isNameUsedInOtherFiles(file.Filename, def.Name)
 		}
 
 		for _, imp := range a.allImports[file.Filename] {
@@ -144,26 +141,7 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 				if impName == "" {
 					continue
 				}
-
-				isUsed := false
-
-				for _, otherFile := range req.Files {
-					if otherFile.Filename == file.Filename {
-						continue
-					}
-
-					otherContent := removeImportLines(otherFile.Content)
-					if strings.Contains(otherContent, impName) {
-						isUsed = true
-						break
-					}
-				}
-
-				if isUsed {
-					usedNames[impName+"@"+file.Filename] = true
-				} else {
-					usedNames[impName+"@"+file.Filename] = false
-				}
+				usedNames[impName+"@"+file.Filename] = isNameUsedInOtherFiles(file.Filename, impName)
 			}
 		}
 
@@ -172,26 +150,7 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 			if paramName == "" {
 				continue
 			}
-
-			isUsed := false
-
-			for _, otherFile := range req.Files {
-				if otherFile.Filename == file.Filename {
-					continue
-				}
-
-				otherContent := removeImportLines(otherFile.Content)
-				if strings.Contains(otherContent, paramName) {
-					isUsed = true
-					break
-				}
-			}
-
-			if isUsed {
-				usedNames[paramName+"@"+file.Filename] = true
-			} else {
-				usedNames[paramName+"@"+file.Filename] = false
-			}
+			usedNames[paramName+"@"+file.Filename] = isNameUsedInOtherFiles(file.Filename, paramName)
 		}
 	}
 
@@ -368,10 +327,38 @@ func detectLanguageWrapper(this js.Value, args []js.Value) interface{} {
 func removeImportLines(content string) string {
 	lines := strings.Split(content, "\n")
 	var result []string
+	inGoImportBlock := false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if !inGoImportBlock {
+				result = append(result, line)
+			}
+			continue
+		}
+
+		if inGoImportBlock {
+			if trimmed == ")" {
+				inGoImportBlock = false
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "import (") {
+			inGoImportBlock = true
+			continue
+		}
 		if strings.HasPrefix(trimmed, "import ") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "from ") && strings.Contains(trimmed, " import ") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "use ") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "require ") || strings.HasPrefix(trimmed, "require_relative ") {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "export ") && strings.Contains(trimmed, "from") {

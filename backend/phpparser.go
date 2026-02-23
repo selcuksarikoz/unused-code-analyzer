@@ -487,7 +487,8 @@ func buildResultPHP(file AnalyzeFile, defs []Definition, imports []Import, usedN
 	var unusedVars []CodeIssue
 	for _, d := range localDefs {
 		key := d.name + "@" + file.Filename
-		if !usedNames[key] {
+		isLocallyUsed := counts[d.name] > 1
+		if !usedNames[key] && !isLocallyUsed {
 			unusedVars = append(unusedVars, CodeIssue{
 				ID:   generateUUID(),
 				Line: d.line,
@@ -501,7 +502,8 @@ func buildResultPHP(file AnalyzeFile, defs []Definition, imports []Import, usedN
 	for _, p := range parameters {
 		paramName := strings.TrimSpace(strings.TrimSuffix(p.Text, " (parameter)"))
 		key := paramName + "@" + file.Filename
-		if usedNames[key] {
+		isLocallyUsed := counts[paramName] > 1
+		if usedNames[key] || isLocallyUsed {
 			paramUsed[paramName] = true
 		}
 	}

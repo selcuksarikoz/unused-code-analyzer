@@ -2,7 +2,7 @@
   "name": "get-unused-imports",
   "displayName": "Get Unused Imports",
   "description": "Detect and remove unused imports, variables, and parameters in TypeScript, JavaScript, Python, Go, Ruby, and PHP code",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "selcuksarikoz",
   "repository": {
     "type": "git",

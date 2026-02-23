@@ -1,41 +1,104 @@
-const fs = require('fs');
-const path = require('path');
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
-const wasmPath = path.join(__dirname, 'out', 'main.wasm');
-const wasmExecPath = path.join(__dirname, 'out', 'wasm_exec.js');
+const projectRoot = path.resolve(__dirname, "..");
+const wasmPath = path.join(projectRoot, "out", "main.wasm");
+const wasmExecPath = path.join(projectRoot, "out", "wasm_exec.js");
 
 if (!fs.existsSync(wasmPath)) {
-  console.error('WASM not found:', wasmPath);
+  console.error("WASM not found:", wasmPath);
+  process.exit(1);
+}
+
+if (!fs.existsSync(wasmExecPath)) {
+  console.error("wasm_exec.js not found:", wasmExecPath);
   process.exit(1);
 }
 
 require(wasmExecPath);
-const go = new Go();
 
-WebAssembly.instantiate(fs.readFileSync(wasmPath), go.importObject)
-  .then(result => {
-    go.run(result.instance);
-    
-    const files = [
-      { filename: 'test-samples/main.ts', content: fs.readFileSync('test-samples/main.ts', 'utf-8'), hash: '1' },
-      { filename: 'test-samples/utils.ts', content: fs.readFileSync('test-samples/utils.ts', 'utf-8'), hash: '2' },
-      { filename: 'test-samples/reexports.ts', content: fs.readFileSync('test-samples/reexports.ts', 'utf-8'), hash: 'reex' },
-      { filename: 'test-samples/feature.ts', content: fs.readFileSync('test-samples/feature.ts', 'utf-8'), hash: 'feat' },
-      { filename: 'test-samples/main.jsx', content: fs.readFileSync('test-samples/main.jsx', 'utf-8'), hash: 'jsx' },
-      { filename: 'test-samples/main.vue', content: fs.readFileSync('test-samples/main.vue', 'utf-8'), hash: 'vue' },
-      { filename: 'test-samples/main.py', content: fs.readFileSync('test-samples/main.py', 'utf-8'), hash: '3' },
-      { filename: 'test-samples/utils.py', content: fs.readFileSync('test-samples/utils.py', 'utf-8'), hash: '4' },
-      { filename: 'test-samples/feature.py', content: fs.readFileSync('test-samples/feature.py', 'utf-8'), hash: 'featpy' },
-      { filename: 'test-samples/main.rb', content: fs.readFileSync('test-samples/main.rb', 'utf-8'), hash: '5' },
-      { filename: 'test-samples/utils.rb', content: fs.readFileSync('test-samples/utils.rb', 'utf-8'), hash: '6' },
-      { filename: 'test-samples/feature.rb', content: fs.readFileSync('test-samples/feature.rb', 'utf-8'), hash: 'featruby' },
-      { filename: 'test-samples/main.php', content: fs.readFileSync('test-samples/main.php', 'utf-8'), hash: '7' },
-      { filename: 'test-samples/utils.php', content: fs.readFileSync('test-samples/utils.php', 'utf-8'), hash: '8' },
-      { filename: 'test-samples/feature.php', content: fs.readFileSync('test-samples/feature.php', 'utf-8'), hash: 'featphp' },
-      { filename: 'test-samples/main.go', content: fs.readFileSync('test-samples/main.go', 'utf-8'), hash: 'go' },
-    ];
+function normalizeResult(rawResult) {
+  const parsed = JSON.parse(rawResult);
+  const results = parsed.Results || parsed.results || {};
+  const normalized = {};
 
-    const analysisResult = globalThis.analyzeWorkspace(JSON.stringify({ files }));
-    console.log(analysisResult);
-  })
-  .catch(console.error);
+  for (const [filename, issues] of Object.entries(results)) {
+    normalized[filename] = {
+      imports: issues?.imports || issues?.Imports || [],
+      variables: issues?.variables || issues?.Variables || [],
+      parameters: issues?.parameters || issues?.Parameters || [],
+    };
+  }
+
+  return normalized;
+}
+
+async function loadWasmAnalyzer() {
+  const go = new Go();
+  const wasmBytes = fs.readFileSync(wasmPath);
+  const { instance } = await WebAssembly.instantiate(wasmBytes, go.importObject);
+  go.run(instance);
+}
+
+async function main() {
+  await loadWasmAnalyzer();
+
+  const workspace = {
+    files: [
+      {
+        filename: "a.ts",
+        hash: "1",
+        content: [
+          "import { foo } from './x';",
+          "const local = 1;",
+          "console.log(local);",
+        ].join("\n"),
+      },
+      {
+        filename: "b.ts",
+        hash: "2",
+        content: [
+          "const foobar = 2;",
+          "console.log(foobar);",
+        ].join("\n"),
+      },
+      {
+        filename: "c.rb",
+        hash: "3",
+        content: [
+          "def add(a, b)",
+          "  a + b",
+          "end",
+        ].join("\n"),
+      },
+      {
+        filename: "d.php",
+        hash: "4",
+        content: [
+          "<?php",
+          "function add($a, $b) {",
+          "  return $a + $b;",
+          "}",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  const results = normalizeResult(globalThis.analyzeWorkspace(JSON.stringify(workspace)));
+
+  assert(results["a.ts"], "missing result for a.ts");
+  assert(results["c.rb"], "missing result for c.rb");
+  assert(results["d.php"], "missing result for d.php");
+
+  assert.strictEqual(results["a.ts"].imports.length, 1, "foo import should be unused when only foobar exists");
+  assert.strictEqual(results["c.rb"].parameters.length, 0, "ruby params used in same function must not be flagged");
+  assert.strictEqual(results["d.php"].parameters.length, 0, "php params used in same function must not be flagged");
+
+  console.log("test-wasm.js passed");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
