@@ -36,10 +36,6 @@ import (
 func DetectLanguage(filename string) Language {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
-	case ".ts", ".tsx":
-		return LangTypeScript
-	case ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte":
-		return LangJavaScript
 	case ".py":
 		return LangPython
 	case ".go":

@@ -70,8 +70,6 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 
 	var result AnalysisResult
 	switch lang {
-	case LangJavaScript, LangTypeScript:
-		result = analyzeJSTS(req.Content, req.Filename)
 	case LangPython:
 		result = analyzePython(req.Content, req.Filename)
 	case LangGo:
@@ -160,9 +158,6 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		lang := DetectLanguage(file.Filename)
 
 		switch lang {
-		case LangJavaScript, LangTypeScript:
-			results[file.Filename] = buildResultJSTS(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], a.allParameters[file.Filename], usedNames, req.Files)
-			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		case LangPython:
 			results[file.Filename] = buildResultPython(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
@@ -195,8 +190,6 @@ func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Langua
 	var params []CodeIssue
 
 	switch lang {
-	case LangJavaScript, LangTypeScript:
-		defs, imports, _, _, params = analyzeJSTSForWorkspace(file.Content, file.Filename)
 	case LangPython:
 		defs, imports, _, _ = analyzePythonForWorkspace(file.Content, file.Filename)
 	case LangGo:

@@ -5,6 +5,7 @@ import { EXTENSION_ID } from "../constants";
 import type { AnalysisResult, AnalyzeRequest, WorkspaceFile } from "../types";
 import { isJsTsFile } from "../utils/fileUtils";
 import { computeHash } from "../utils/hash";
+import { TypeScriptService } from "./typescriptService";
 
 let wasmInitialized = false;
 let analyzeCodeFn: any = null;
@@ -18,15 +19,18 @@ export class WasmService {
     new Map();
   private workspaceHashes: Map<string, string> = new Map();
   private analyzerChecked = false;
+  private tsService: TypeScriptService;
 
-  constructor() {}
+  constructor() {
+    this.tsService = TypeScriptService.getInstance();
+  }
 
   private async detectBestAnalyzer(): Promise<"tsserver"> {
     if (this.analyzerChecked) {
       return "tsserver";
     }
 
-    console.log("[WASMService] Using WASM analyzer");
+    console.log("[WASMService] Using WASM analyzer for non-JS/TS files");
     this.analyzerChecked = true;
     return "tsserver";
   }
@@ -141,7 +145,34 @@ export class WasmService {
     if (!this.analyzerChecked) {
       await this.detectBestAnalyzer();
     }
-    return this.analyzeWorkspaceWasm(files);
+
+    const results = new Map<string, AnalysisResult>();
+    const wasmFiles: WorkspaceFile[] = [];
+
+    for (const file of files) {
+      if (isJsTsFile(file.filename)) {
+        try {
+          const uri = vscode.Uri.file(file.filename);
+          const document = await vscode.workspace.openTextDocument(uri);
+          const result = await this.tsService.analyzeFile(document);
+          results.set(file.filename, result);
+        } catch (error) {
+          console.error(`[WASMService] Error analyzing ${file.filename}:`, error);
+          results.set(file.filename, { imports: [], variables: [], parameters: [] });
+        }
+      } else {
+        wasmFiles.push(file);
+      }
+    }
+
+    if (wasmFiles.length > 0) {
+      const wasmResults = await this.analyzeWorkspaceWasm(wasmFiles);
+      for (const [filename, result] of wasmResults) {
+        results.set(filename, result);
+      }
+    }
+
+    return results;
   }
 
   private async analyzeWorkspaceWasm(
@@ -194,6 +225,18 @@ export class WasmService {
     if (!this.analyzerChecked) {
       await this.detectBestAnalyzer();
     }
+
+    if (isJsTsFile(request.filename)) {
+      try {
+        const uri = vscode.Uri.file(request.filename);
+        const document = await vscode.workspace.openTextDocument(uri);
+        return await this.tsService.analyzeFile(document);
+      } catch (error) {
+        console.error("[WASMService] Error analyzing JS/TS file:", error);
+        return { imports: [], variables: [], parameters: [] };
+      }
+    }
+
     return this.analyzeWasm(request);
   }
 

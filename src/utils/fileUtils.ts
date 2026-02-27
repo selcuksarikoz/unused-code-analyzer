@@ -4,7 +4,7 @@ export function getFileExtension(filename: string): string {
 
 export function isJsTsFile(filename: string): boolean {
   const ext = getFileExtension(filename);
-  return ["ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte"].includes(
+  return ["ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro"].includes(
     ext,
   );
 }
@@ -16,6 +16,8 @@ export function detectLanguage(filename: string): string {
       return "svelte";
     case "vue":
       return "vue";
+    case "astro":
+      return "astro";
     case "ts":
     case "tsx":
       return "typescript";
