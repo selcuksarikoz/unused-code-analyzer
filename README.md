@@ -20,7 +20,7 @@ A VS Code extension to detect unused imports, variables, and parameters in your 
 
 ## Features
 
-- **Multi-language Support**: TypeScript, JavaScript, Python, Go, Ruby, PHP
+- **Multi-language Support**: TypeScript, JavaScript, Python, Go, Ruby, PHP, Astro, Svelte, Vue
 - **Auto Analyzer**: Starts only after you open the "Unused Code" activity view, then analyzes on file changes/saves
 - **Tree View**: Results displayed in Explorer sidebar
 - **Quick Navigation**: Click to jump to unused code
@@ -60,7 +60,7 @@ Open "Unused Code" view in Explorer sidebar. Results are shown with:
 |---------|---------|-------------|
 | `get-unused-imports.autoAnalyzer` | `true` | Automatically analyze on save after the "Unused Code" activity view is opened |
 | `get-unused-imports.autoAnalyzeDelay` | `500` | Delay in ms before auto-analyzing |
-| `get-unused-imports.fileExtensions` | `["ts", "tsx", "js", "jsx", "vue", "svelte", "py", "go", "rb", "php"]` | File extensions to scan |
+| `get-unused-imports.fileExtensions` | `["ts", "tsx", "js", "jsx", "vue", "svelte", "astro", "py", "go", "rb", "php"]` | File extensions to scan |
 | `get-unused-imports.excludeFolders` | `["node_modules", ".next", "dist", "build", "out", ".git"]` | Folders to exclude |
 
 ## Supported Languages
@@ -68,11 +68,14 @@ Open "Unused Code" view in Explorer sidebar. Results are shown with:
 | Language | Extensions | Backend |
 |----------|------------|---------|
 | TypeScript | .ts, .tsx | Native (ts-morph) |
-| JavaScript | .js, .jsx, .vue, .svelte | Native (ts-morph) |
-| Python | .py | WASM (go-python) |
-| Go | .go | WASM (go/parser) |
-| Ruby | .rb | WASM (regex-based) |
-| PHP | .php | WASM (regex-based) |
+| JavaScript | .js, .jsx | Native (ts-morph) |
+| Python | .py | WASM (tokenizer-based) |
+| Go | .go | WASM (tokenizer-based) |
+| Ruby | .rb | WASM (tokenizer-based) |
+| PHP | .php | WASM (tokenizer-based) |
+| Astro | .astro | WASM (tokenizer-based) |
+| Svelte | .svelte | WASM (tokenizer-based) |
+| Vue | .vue | WASM (tokenizer-based) |
 
 ## Architecture
 
