@@ -5,14 +5,11 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.get-unused-imports">
-    <img src="https://img.shields.io/visual-studio-marketplace/v/selcuksarikoz.get-unused-imports" alt="VS Code Marketplace">
+  <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.unused-code-analyzer">
+    <img src="https://img.shields.io/visual-studio-marketplace/v/selcuksarikoz.unused-code-analyzer?label=Install%20unused-code-analyzer&style=for-the-badge&logo=visual-studio-code&color=007ACC" alt="Install on Marketplace">
   </a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.get-unused-imports">
-    <img src="https://img.shields.io/visual-studio-marketplace/d/selcuksarikoz.get-unused-imports" alt="Downloads">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/selcuksarikoz/get-unused-imports" alt="License">
+  <a href="https://open-vsx.org/extension/selcuksarikoz/unused-code-analyzer">
+    <img src="https://img.shields.io/open-vsx/v/selcuksarikoz/unused-code-analyzer?style=for-the-badge&label=Open%20VSX&color=AC3DFF" alt="Open VSX">
   </a>
 </p>
 
@@ -33,49 +30,54 @@ A VS Code extension to detect unused imports, variables, and parameters in your 
 3. Search for "Unused Code Analyzer"
 4. Click Install
 
-Or install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.get-unused-imports)
+Or install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.unused-code-analyzer)
 
 ## Usage
 
 ### Command Palette
+
 - `Get Unused: Scan Workspace` - Analyze entire workspace
 - `Get Unused: Scan File` - Analyze current file
 - `Get Unused: Scan Folder` - Analyze selected folder
 
 ### Auto Analyzer
+
 The extension automatically analyzes files when:
+
 - The "Unused Code" activity view is opened at least once
 - A relevant file is changed or saved after that
 - Results are updated in real-time
 
 ### Tree View
+
 Open "Unused Code" view in Explorer sidebar. Results are shown with:
+
 - File names and issue counts
 - Issue types (Imports, Variables, Parameters)
 - Click to jump to the issue
 
 ### Settings
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `get-unused-imports.autoAnalyzer` | `true` | Automatically analyze on save after the "Unused Code" activity view is opened |
-| `get-unused-imports.autoAnalyzeDelay` | `500` | Delay in ms before auto-analyzing |
-| `get-unused-imports.fileExtensions` | `["ts", "tsx", "js", "jsx", "vue", "svelte", "astro", "py", "go", "rb", "php"]` | File extensions to scan |
-| `get-unused-imports.excludeFolders` | `["node_modules", ".next", "dist", "build", "out", ".git"]` | Folders to exclude |
+| Setting                                 | Default                                                                         | Description                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `unused-code-analyzer.autoAnalyzer`     | `true`                                                                          | Automatically analyze on save after the "Unused Code" activity view is opened |
+| `unused-code-analyzer.autoAnalyzeDelay` | `500`                                                                           | Delay in ms before auto-analyzing                                             |
+| `unused-code-analyzer.fileExtensions`   | `["ts", "tsx", "js", "jsx", "vue", "svelte", "astro", "py", "go", "rb", "php"]` | File extensions to scan                                                       |
+| `unused-code-analyzer.excludeFolders`   | `["node_modules", ".next", "dist", "build", "out", ".git"]`                     | Folders to exclude                                                            |
 
 ## Supported Languages
 
-| Language | Extensions | Backend |
-|----------|------------|---------|
-| TypeScript | .ts, .tsx | Native (ts-morph) |
-| JavaScript | .js, .jsx | Native (ts-morph) |
-| Python | .py | WASM (tokenizer-based) |
-| Go | .go | WASM (tokenizer-based) |
-| Ruby | .rb | WASM (tokenizer-based) |
-| PHP | .php | WASM (tokenizer-based) |
-| Astro | .astro | WASM (tokenizer-based) |
-| Svelte | .svelte | WASM (tokenizer-based) |
-| Vue | .vue | WASM (tokenizer-based) |
+| Language   | Extensions | Backend                |
+| ---------- | ---------- | ---------------------- |
+| TypeScript | .ts, .tsx  | Native (ts-morph)      |
+| JavaScript | .js, .jsx  | Native (ts-morph)      |
+| Python     | .py        | WASM (tokenizer-based) |
+| Go         | .go        | WASM (tokenizer-based) |
+| Ruby       | .rb        | WASM (tokenizer-based) |
+| PHP        | .php       | WASM (tokenizer-based) |
+| Astro      | .astro     | WASM (tokenizer-based) |
+| Svelte     | .svelte    | WASM (tokenizer-based) |
+| Vue        | .vue       | WASM (tokenizer-based) |
 
 ## Architecture
 
@@ -104,5 +106,5 @@ MIT License - see [LICENSE](LICENSE)
 ---
 
 <p align="center">
-  <strong>☕ Enjoying Unused Code Analyzer? <a href="https://buymeacoffee.com/funnyturkishdude">Buy me a coffee</a> or leave a rating on the <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.get-unused-imports">Marketplace</a>!</strong>
+  <strong>☕ Enjoying Unused Code Analyzer? <a href="https://buymeacoffee.com/funnyturkishdude">Buy me a coffee</a> or leave a rating on the <a href="https://marketplace.visualstudio.com/items?itemName=selcuksarikoz.unused-code-analyzer">Marketplace</a>!</strong>
 </p>
