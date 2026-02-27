@@ -60,7 +60,7 @@ class ResultsTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   getChildren(element?: vscode.TreeItem): vscode.TreeItem[] {
     if (!element) {
       if (this.results.length === 0) {
-        const empty = new vscode.TreeItem('Click "Scan Workspace" to analyze');
+        const empty = new vscode.TreeItem('Click "Scan Workspace" to analyze unused imports, variables, and parameters');
         empty.contextValue = "empty";
         return [empty];
       }
@@ -435,13 +435,26 @@ class Extension implements vscode.Disposable {
   }
 
   private async ensureActivityViewOpened(): Promise<void> {
-    if (this.hasActivityViewOpened) {
+    if (this.hasActivityViewOpened && this.treeView?.visible) {
       return;
     }
 
     await vscode.commands.executeCommand(
       "workbench.view.extension.get-unused-imports",
     );
+
+    if (!this.hasActivityViewOpened) {
+      await new Promise<void>((resolve) => {
+        const disposable = this.treeView?.onDidChangeVisibility((e) => {
+          if (e.visible) {
+            this.hasActivityViewOpened = true;
+            disposable?.dispose();
+            resolve();
+          }
+        });
+        setTimeout(() => resolve(), 500);
+      });
+    }
   }
 
   private registerCommands(): void {
@@ -554,15 +567,6 @@ class Extension implements vscode.Disposable {
       console.log("[Extension] TreeView visibility changed:", e.visible);
       if (e.visible) {
         this.hasActivityViewOpened = true;
-      }
-
-      if (e.visible && this.canAutoAnalyzeNow()) {
-        const results = this.treeProvider.getResults();
-        console.log("[Extension] Current results count:", results.length);
-        if (results.length === 0) {
-          console.log("[Extension] No results, running initial scan...");
-          await this.scanWorkspace();
-        }
       }
     });
 
@@ -685,11 +689,20 @@ class Extension implements vscode.Disposable {
       };
 
       this.treeProvider.addResults([fileIssue]);
+      
+      await this.revealResultsInTreeView();
+      
       vscode.window.showInformationMessage(
         `Analyzed file with workspace cross-reference (${scannedCount} files): ${fileIssue.file}`,
       );
     } catch (error) {
       vscode.window.showErrorMessage(`Analysis failed: ${error}`);
+    }
+  }
+
+  private async revealResultsInTreeView(): Promise<void> {
+    if (this.treeView) {
+      await vscode.commands.executeCommand("get-unused-imports.results.focus");
     }
   }
 
@@ -752,6 +765,8 @@ class Extension implements vscode.Disposable {
         }
 
         this.treeProvider.addResults(fileResults);
+        
+        await this.revealResultsInTreeView();
       }
 
       totalResults = this.treeProvider.getResults().length || 0;
