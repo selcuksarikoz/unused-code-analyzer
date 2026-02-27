@@ -44,6 +44,12 @@ func DetectLanguage(filename string) Language {
 		return LangRuby
 	case ".php":
 		return LangPHP
+	case ".astro":
+		return LangAstro
+	case ".svelte":
+		return LangSvelte
+	case ".vue":
+		return LangVue
 	default:
 		return LangUnknown
 	}

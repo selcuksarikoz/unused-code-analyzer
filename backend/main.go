@@ -78,6 +78,12 @@ func (a *MultiLangAnalyzer) Analyze(req AnalyzeRequest) AnalysisResult {
 		result = analyzeRuby(req.Content, req.Filename)
 	case LangPHP:
 		result = analyzePHP(req.Content, req.Filename)
+	case LangAstro:
+		result = analyzeAstro(req.Content, req.Filename)
+	case LangSvelte:
+		result = analyzeSvelte(req.Content, req.Filename)
+	case LangVue:
+		result = analyzeSvelte(req.Content, req.Filename) // Vue uses same script extraction as Svelte
 	default:
 		result = AnalysisResult{}
 	}
@@ -96,6 +102,29 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 
 	for _, file := range req.Files {
 		lang := DetectLanguage(file.Filename)
+
+		// For Astro/Svelte/Vue, use content-aware parsing
+		if lang == LangAstro || lang == LangSvelte || lang == LangVue {
+			var scriptContent string
+			if lang == LangAstro {
+				scriptContent = extractAstroScript(file.Content)
+			} else {
+				scriptContent = extractScriptContent(file.Content)
+			}
+
+			// Extract definitions and imports from script content
+			if scriptContent != "" {
+				tokens := tokenizeJS(scriptContent)
+				a.allDefinitions[file.Filename] = parseJSDefinitions(tokens, file.Filename)
+				a.allImports[file.Filename] = parseJSImports(tokens)
+				a.allParameters[file.Filename] = findJSUnusedParameters(scriptContent, file.Filename)
+			} else {
+				a.allDefinitions[file.Filename] = []Definition{}
+				a.allImports[file.Filename] = []Import{}
+				a.allParameters[file.Filename] = []CodeIssue{}
+			}
+			continue
+		}
 
 		defs, imports, params := a.getParsedWorkspaceData(file, lang)
 		a.allDefinitions[file.Filename] = defs
@@ -170,6 +199,12 @@ func (a *MultiLangAnalyzer) AnalyzeWorkspace(req WorkspaceAnalyzeRequest) Worksp
 		case LangPHP:
 			results[file.Filename] = buildResultPHP(file, a.allDefinitions[file.Filename], a.allImports[file.Filename], usedNames, req.Files)
 			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
+		case LangAstro:
+			results[file.Filename] = analyzeAstro(file.Content, file.Filename)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
+		case LangSvelte, LangVue:
+			results[file.Filename] = analyzeSvelte(file.Content, file.Filename)
+			a.cache[file.Filename] = CacheEntry{hash: file.Hash, result: results[file.Filename]}
 		default:
 			results[file.Filename] = AnalysisResult{}
 		}
@@ -198,6 +233,30 @@ func (a *MultiLangAnalyzer) getParsedWorkspaceData(file AnalyzeFile, lang Langua
 		defs, imports, _, _ = analyzeRubyForWorkspace(file.Content, file.Filename)
 	case LangPHP:
 		defs, imports, _, _ = analyzePHPForWorkspace(file.Content, file.Filename)
+	case LangAstro:
+		scriptContent := extractAstroScript(file.Content)
+		if scriptContent != "" {
+			tokens := tokenizeJS(scriptContent)
+			defs = parseJSDefinitions(tokens, file.Filename)
+			imports = parseJSImports(tokens)
+			params = findJSUnusedParameters(scriptContent, file.Filename)
+		} else {
+			defs = []Definition{}
+			imports = []Import{}
+			params = []CodeIssue{}
+		}
+	case LangSvelte, LangVue:
+		scriptContent := extractScriptContent(file.Content)
+		if scriptContent != "" {
+			tokens := tokenizeJS(scriptContent)
+			defs = parseJSDefinitions(tokens, file.Filename)
+			imports = parseJSImports(tokens)
+			params = findJSUnusedParameters(scriptContent, file.Filename)
+		} else {
+			defs = []Definition{}
+			imports = []Import{}
+			params = []CodeIssue{}
+		}
 	default:
 		defs = []Definition{}
 		imports = []Import{}
