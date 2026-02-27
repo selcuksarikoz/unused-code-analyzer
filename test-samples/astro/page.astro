@@ -1,0 +1,89 @@
+---
+// Astro Frontmatter
+// Test file for unused code detection
+
+// ========== IMPORTS ==========
+// Used imports
+import Layout from '../layouts/Layout.astro';
+
+// Unused imports
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import type { MarkdownInstance } from 'astro';
+
+// ========== PROPS INTERFACE ==========
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+
+// ========== UNUSED PROPS ==========
+const { unusedProp } = Astro.props;
+
+// ========== DATA FETCHING ==========
+// Used data
+const posts = await Astro.glob('../posts/*.md');
+
+// Unused data
+const unusedData = await Astro.glob('../unused/*.md');
+
+// ========== VARIABLES ==========
+// Used variables
+const siteName = 'My Astro Site';
+const currentYear = new Date().getFullYear();
+
+// Unused variables
+const unusedConst = 'never used';
+let unusedLet = 42;
+
+// ========== FUNCTIONS ==========
+// Used function
+function formatDate(date: Date): string {
+  return date.toLocaleDateString();
+}
+
+// Unused function
+function unusedFormatter(date: Date): string {
+  return date.toISOString();
+}
+
+// Function with unused parameter
+function processPost(post: any, unusedFilter: string): string {
+  return post.frontmatter.title;
+}
+
+// ========== TYPES ==========
+interface Post {
+  frontmatter: {
+    title: string;
+    date: string;
+  };
+}
+
+type UnusedType = Post | null;
+
+// Unused type usage
+const unusedTyped: UnusedType = null;
+---
+
+<Layout title={title}>
+  <main>
+    <h1>{siteName}</h1>
+    <p>{description}</p>
+    <p>© {currentYear}</p>
+    
+    <ul>
+      {posts.map((post) => (
+        <li>{processPost(post, 'unused')}</li>
+      ))}
+    </ul>
+  </main>
+</Layout>
+
+<style>
+  main {
+    padding: 20px;
+  }
+</style>
